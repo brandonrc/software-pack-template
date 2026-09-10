@@ -350,7 +350,7 @@ Your app then configures its OAuth provider using these environment variables.
 
 ## NebariApp CRD vs Envoy Gateway SecurityPolicy
 
-The fields documented in the [NebariApp CRD Reference](/nebariapp-crd-reference/) are
+The fields documented in the [NebariApp API reference](https://github.com/nebari-dev/nebari-operator/blob/main/docs/api-reference.md) are
 the fields the **operator** understands - they go on `spec.auth` of the NebariApp
 resource. At runtime, the operator generates an Envoy Gateway `SecurityPolicy` from
 the NebariApp, and that SecurityPolicy has its own (much larger) set of OIDC tuning

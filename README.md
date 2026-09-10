@@ -175,7 +175,7 @@ software-pack-template/
     Makefile                     # Local dev with full Nebari stack on kind
     .cache/                      # (gitignored) Cloned nebari-operator scripts
   docs/
-    nebariapp-crd-reference.md   # Full NebariApp field reference
+    nebariapp-crd-reference.md   # Where the contract and field reference live
     auth-flow.md                 # Authentication flow details
   .gitignore
   .editorconfig
@@ -250,8 +250,8 @@ deploying standalone, simply skip that file or exclude it from your apply comman
 ### Beyond the basics
 
 The fields shown above cover the common cases. The operator also supports several
-more specialized features. Each is documented in
-[docs/nebariapp-crd-reference.md](docs/nebariapp-crd-reference.md):
+more specialized features. Each is documented in the
+[NebariApp API reference](https://github.com/nebari-dev/nebari-operator/blob/main/docs/api-reference.md), generated from the operator's Go types:
 
 - **`routing.publicRoutes`** - paths that bypass OIDC auth (e.g., `/healthz`,
   webhooks, public APIs).
@@ -277,7 +277,8 @@ more specialized features. Each is documented in
 - **`service.namespace`** - point the NebariApp at a Service in a different
   namespace.
 
-For the complete field reference, see [docs/nebariapp-crd-reference.md](docs/nebariapp-crd-reference.md).
+For the complete field reference, see the [NebariApp API reference](https://github.com/nebari-dev/nebari-operator/blob/main/docs/api-reference.md). For what a pack
+has to satisfy, see the [Nebari Pack Specification](https://github.com/nebari-dev/nebari-operator/blob/main/docs/pack-specification.md).
 
 ## Example 1: Vanilla YAML (Plain Manifests)
 

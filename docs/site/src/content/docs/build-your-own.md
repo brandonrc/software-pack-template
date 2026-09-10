@@ -48,6 +48,6 @@ Packs do not need to be public. Put yours in a private GitHub repo, an internal 
 
 ## Going deeper
 
-- [NebariApp CRD reference](/nebariapp-crd-reference/) - every field explained
+- [Nebari Pack Specification](https://github.com/nebari-dev/nebari-operator/blob/main/docs/pack-specification.md) - what a pack must satisfy, and where every field is documented
 - [Authentication flow](/auth-flow/) - how OIDC works end-to-end, including reading the IdToken in your app
 - [Release readiness](/release-readiness/) - maturity levels and the promotion checklist for official packs
