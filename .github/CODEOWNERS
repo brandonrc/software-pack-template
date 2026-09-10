@@ -1,0 +1,24 @@
+# Code owners for this repository.
+#
+# GitHub requests review from an owner automatically, and the branch protection
+# rule requires an approving review from one. Replace the handles below before
+# using this template for a real pack: a CODEOWNERS file naming someone who does
+# not maintain the repository is worse than none, because it routes review to a
+# person who will not do it.
+#
+# Entries are last-match-wins, so put the general rule first and narrow after.
+
+# Everything, by default.
+*                       @your-handle
+
+# Uncomment and adjust as the pack grows.
+# /chart/               @your-handle
+# /docs/                @your-handle
+# /.github/workflows/   @your-handle
+
+# Files the repository standards require. Losing one silently breaks
+# conformance, so review them deliberately.
+/pack-metadata.yaml     @your-handle
+/GOVERNANCE.md          @your-handle
+/MAINTAINERS.md         @your-handle
+/SECURITY.md            @your-handle

@@ -1,0 +1,48 @@
+# pack-metadata.yaml
+#
+# Declares this pack's maturity, ownership, and which version of the platform
+# contract it targets. The pack dashboard reads it hourly:
+#   https://github.com/nebari-dev/software-pack-dashboard
+#
+# Replace every placeholder below before using this template for a real pack.
+# The schema and a fully commented example are at:
+#   https://github.com/nebari-dev/software-pack-dashboard/tree/main/schema
+#
+# Validate before committing:
+#   pip install check-jsonschema
+#   check-jsonschema \
+#     --schemafile https://raw.githubusercontent.com/nebari-dev/software-pack-dashboard/main/schema/pack-metadata.schema.json \
+#     pack-metadata.yaml
+
+# Must equal the GitHub repository name exactly.
+name: your-pack-name
+
+# Human-readable name, shown on the dashboard.
+display_name: Your Pack
+
+# experimental | alpha | beta | ga
+# Start at experimental. Promotion is gated by docs/release-readiness-checklist.md
+# and is a deliberate PR, not something that drifts upward on its own.
+level: experimental
+
+# GitHub username of the single most accountable engineer, no "@".
+# Keep this consistent with MAINTAINERS.md.
+owner: your-handle
+
+deprecated: false
+
+# Required once level is ga. Null is fine before that.
+product_owner: null
+
+# full | partial | none | na
+nebariapp_integration: full
+
+# Which version of the Nebari Pack Specification this pack was built against:
+#   https://github.com/nebari-dev/nebari-operator/blob/main/docs/pack-specification.md
+# Recording it means a Macro release of the specification shows up as work this
+# pack owes, instead of as a surprise during a platform upgrade.
+target_pack_spec_version: "0.1.0"
+
+# Whether the pack installs without the Nebari Operator, as a plain Helm chart.
+scope:
+  standalone-supported: no

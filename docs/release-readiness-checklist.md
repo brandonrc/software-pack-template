@@ -23,8 +23,9 @@ A pack moves through four sequential active levels. **Deprecated** is an orthogo
 - **Promise:** Stable enough for a customer to deploy in their own environment with engineering support. APIs and values may still change between releases.
 - **Pre-sales behavior:** Can demo without caveat. Customer pilots may be offered with engineering involvement.
 
-### GA (v1.0+)
+### GA (`1.0.0` and above)
 - **Audience:** Production customers.
+- **Versioning:** Experimental, Alpha, and Beta sit on the `0.x` line. GA means `1.0.0` or above, per the [version tagging convention](#version-tagging-convention).
 - **Promise:** Fully supported. Documented upgrade path between releases. We own the bug-fix and security-fix story.
 - **Pre-sales behavior:** Pitch freely.
 
@@ -54,7 +55,8 @@ Key fields the checklist depends on:
 - `owner` — accountable engineer's GitHub username
 - `product_owner` — required when `level: ga`
 - `deprecated` + `sunset_date` — see Deprecated status above
-- `nebariapp_integration` — `none` | `partial` | `full` | `na`
+- `nebariapp_integration` — `none` | `partial` | `full` | `na`, measured against the [Pack Specification](https://github.com/nebari-dev/nebari-operator/blob/main/docs/pack-specification.md)
+- `target_pack_spec_version` — the specification version the pack was built against
 - `scope.standalone-supported` — `yes` | `no`
 - `last_promoted_at` / `last_promoted_pr` — updated on every promotion
 - `demo_notes` — current known gotchas, surfaced in the dashboard Notes column (first ~100 chars)
@@ -157,6 +159,8 @@ If "product owner" has not been named for a pack, the tech lead acts as product 
 - `[A]` `NebariApp` reaches Ready condition with all applicable sub-conditions healthy (RoutingReady, TLSReady, AuthReady)
 - `[A]` All configurable NebariApp fields used by the pack are documented in the pack's values reference
 - `[A]` `nebariapp_integration` field in `pack-metadata.yaml` accurately reflects the integration depth (`none` | `partial` | `full` | `na`)
+- `[A]` Pack satisfies every MUST in the [Pack Specification](https://github.com/nebari-dev/nebari-operator/blob/main/docs/pack-specification.md), which is the contract these checks are measured against
+- `[B]` `target_pack_spec_version` in `pack-metadata.yaml` names the specification version the pack was verified against
 - `[B]` Auth-protected routes reject unauthenticated requests (if auth enabled)
 - `[B]` Auth-protected routes allow authenticated users with correct group membership (if auth enabled)
 - `[B]` Health/readiness probes configured and verified
@@ -184,6 +188,9 @@ If "product owner" has not been named for a pack, the tech lead acts as product 
 - `[GA]` Example dashboard or Grafana panel definition for the LGTM stack (if applicable)
 
 ### Security
+
+These are the [security baseline](https://github.com/nebari-dev/nebari-operator/blob/main/docs/pack-specification.md#6-security-baseline), which the Pack Specification owns. It is repeated here because this checklist is what a promotion PR is reviewed against; the specification is authoritative if the two ever disagree.
+
 - `[B]` Containers do not run as root (or have documented justification if they must)
 - `[B]` No secrets hardcoded in templates or default values
 - `[B]` OIDC scopes minimally scoped to what the app needs
@@ -207,8 +214,10 @@ If "product owner" has not been named for a pack, the tech lead acts as product 
 - `[GA]` Pre-sales engineer has verified the demo flow on the GA release commit after release
 
 ### Sign-off
+
+These roles are operational, not governance roles. The project governance does not define or appoint them; this checklist is the authority on who signs off on what, so the two cannot drift. Pre-sales is not a sign-off role: it is a commercial function, and demo readiness is tracked separately under Pre-sales Verification.
+
 - `[A]` Pack owner approves the promotion PR
-- `[A]` Pre-sales rep approves the promotion PR
 - `[B]` Tech lead approves the promotion PR
 - `[GA]` Product owner has documented and verified acceptance criteria
 - `[GA]` Product owner approves the promotion PR

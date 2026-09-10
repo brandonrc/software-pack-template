@@ -116,12 +116,14 @@ For local development (optional):
 
 ```
 software-pack-template/
-  .github/workflows/
-    build-images.yaml            # Build + publish images via reusable pack-build-image
-    lint.yaml                    # Manifest validation (all examples)
-    test.yaml                    # Integration tests on kind cluster
-    test-integration.yaml        # NebariApp integration tests (full stack)
-    release.yaml                 # Release chart via reusable pack-release workflow
+  .github/
+    CODEOWNERS                   # Review routing; replace the handles
+    workflows/
+      build-images.yaml          # Build + publish images via reusable pack-build-image
+      lint.yaml                  # Manifest validation (all examples)
+      test.yaml                  # Integration tests on kind cluster
+      test-integration.yaml      # NebariApp integration tests (full stack)
+      release.yaml               # Release chart via reusable pack-release workflow
   examples/
     vanilla-yaml/                # Example 1: Plain Kubernetes manifests
       deployment.yaml            # nginx Deployment
@@ -177,10 +179,18 @@ software-pack-template/
   docs/
     nebariapp-crd-reference.md   # Full NebariApp field reference
     auth-flow.md                 # Authentication flow details
+    release-readiness-checklist.md # Maturity levels and promotion gates
+    adr/                         # Architecture decision records
+  pack-metadata.yaml             # Declared maturity, owner, target spec version
   .gitignore
   .editorconfig
+  CODE_OF_CONDUCT.md             # Links to the org Code of Conduct
+  CONTRIBUTING.md                # How to contribute, and what needs an RFD
+  GOVERNANCE.md                  # Tier, target spec version, who decides what
   LICENSE                        # Apache 2.0
+  MAINTAINERS.md                 # Authoritative maintainer list for this repo
   README.md                      # This file
+  SECURITY.md                    # How to report a vulnerability
 ```
 
 ## The NebariApp CRD
