@@ -4,13 +4,15 @@
 # =============================================================================
 # Nebari Integration
 # =============================================================================
-# Creates a NebariApp CRD that configures routing, TLS, and auth via nebari-operator.
-# Set enabled: true when deploying on a Nebari cluster.
+# NebariApp CR (https://github.com/nebari-dev/nebari-operator).
+# Rendered through the official nebari-app.nebariApp template
+# (https://github.com/nebari-dev/nebari-operator/tree/main/charts/nebari-app) with templating enabled.
 nebariapp:
   enabled: false
-  # hostname: my-pack.nebari.example.com  # Required when enabled
+  hostname: '{{ fail "nebariapp.hostname is required when nebariapp.enabled is true" }}'
   service:
-    name: ""   # Defaults to <release>-podinfo (the upstream service name)
+    # Points to the upstream podinfo chart's service
+    name: '{{ include "my-pack.podinfo-service-name" . | toJson }}'
     port: 9898
   auth:
     enabled: false

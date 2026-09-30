@@ -39,6 +39,9 @@ jobs:
         run: kubectl kustomize examples/kustomize-nginx/overlays/production/ | kubeconform -strict -ignore-missing-schemas
 
       # Basic nginx Helm example
+      - name: Build basic-nginx dependencies
+        run: helm dependency build examples/basic-nginx/chart/
+
       - name: Lint basic-nginx
         run: helm lint examples/basic-nginx/chart/
 
@@ -49,6 +52,9 @@ jobs:
         run: helm template test examples/basic-nginx/chart/ --set nebariapp.enabled=true --set nebariapp.hostname=test.example.com
 
       # Auth-aware FastAPI Helm example
+      - name: Build auth-fastapi dependencies
+        run: helm dependency build examples/auth-fastapi/chart/
+
       - name: Lint auth-fastapi
         run: helm lint examples/auth-fastapi/chart/
 

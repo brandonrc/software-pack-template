@@ -63,6 +63,9 @@ jobs:
         run: kubectl delete namespace test-kustomize --wait
 
       # Test basic nginx Helm example
+      - name: Build basic-nginx dependencies
+        run: helm dependency build examples/basic-nginx/chart/
+
       - name: Install basic-nginx chart
         run: |
           helm install test-basic examples/basic-nginx/chart/ \
@@ -88,6 +91,9 @@ jobs:
         run: |
           docker build -t ghcr.io/nebari-dev/software-pack-template/auth-fastapi-example:latest examples/auth-fastapi/
           kind load docker-image ghcr.io/nebari-dev/software-pack-template/auth-fastapi-example:latest --name pack-test
+
+      - name: Build auth-fastapi dependencies
+        run: helm dependency build examples/auth-fastapi/chart/
 
       - name: Install auth-fastapi chart
         run: |

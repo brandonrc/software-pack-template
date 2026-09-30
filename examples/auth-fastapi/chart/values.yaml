@@ -27,14 +27,15 @@ resources: {}
 # =============================================================================
 # Nebari Integration
 # =============================================================================
-# Creates a NebariApp CRD that configures routing, TLS, and auth via nebari-operator.
-# This example enables auth by default since the app is designed to read IdToken cookies.
+# NebariApp CR (https://github.com/nebari-dev/nebari-operator).
+# Rendered through the official nebari-app.nebariApp template 
+# (https://github.com/nebari-dev/nebari-operator/tree/main/charts/nebari-app) with templating enabled.
 nebariapp:
   enabled: false
-  # hostname: my-pack.nebari.example.com  # Required when enabled
+  hostname: '{{ fail "nebariapp.hostname is required when nebariapp.enabled is true" }}'
   service:
-    name: ""   # Defaults to release fullname
-    port: 80
+    name: '{{ include "my-pack.fullname" . | toJson }}'
+    port: '{{ .Values.service.port }}'
   routing:
     routes:
       - pathPrefix: /
