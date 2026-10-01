@@ -244,21 +244,31 @@ without additional RBAC configuration.
 apiVersion: gateway.envoyproxy.io/v1alpha1
 kind: SecurityPolicy
 metadata:
-  name: <nebariapp-name>-oidc
+  name: <nebariapp-name>-security
 spec:
   targetRefs:
     - group: gateway.networking.k8s.io
       kind: HTTPRoute
-      name: <nebariapp-name>
+      name: <nebariapp-name>-route
   oidc:
     provider:
-      issuer: https://<keycloak-host>/realms/<realm>
-    clientID: <from-secret>
+      # In-cluster Keycloak URL, used only by Envoy Gateway's control plane
+      issuer: http://<keycloak-service>.<keycloak-namespace>.svc.cluster.local/.../realms/<realm>
+      tokenEndpoint: <in-cluster Keycloak>/protocol/openid-connect/token
+      # Browser-facing endpoints, set when the operator has KEYCLOAK_EXTERNAL_URL
+      authorizationEndpoint: <public Keycloak>/protocol/openid-connect/auth
+      endSessionEndpoint: <public Keycloak>/protocol/openid-connect/logout
+    clientID: <namespace>-<nebariapp-name>
     clientSecret:
       name: <nebariapp-name>-oidc-client
     redirectURL: https://<hostname><redirectURI>
+    logoutPath: /logout
     scopes: [openid, profile, email]
 ```
+
+The policy targets only `<nebariapp-name>-route`. Paths in `routing.publicRoutes` are
+served by a second HTTPRoute, `<nebariapp-name>-public-route`, which has no SecurityPolicy.
+The policy contains no authorization rules: `auth.groups` is not enforced here.
 
 ### 4. HTTPRoute
 
@@ -266,7 +276,7 @@ spec:
 apiVersion: gateway.networking.k8s.io/v1
 kind: HTTPRoute
 metadata:
-  name: <nebariapp-name>
+  name: <nebariapp-name>-route   # plus <nebariapp-name>-public-route for publicRoutes
 spec:
   parentRefs:
     - name: <gateway-name>
@@ -281,13 +291,18 @@ spec:
 
 ### 5. cert-manager Certificate (when `routing.tls.enabled: true`)
 
+Created only when the operator has a cert-manager ClusterIssuer configured and
+`routing.tls.secretName` is not set. Certificates live in the Gateway's namespace, so
+their names include the app's namespace:
+
 ```yaml
 apiVersion: cert-manager.io/v1
 kind: Certificate
 metadata:
-  name: <nebariapp-name>-tls
+  name: <nebariapp-name>-<namespace>-cert
+  namespace: envoy-gateway-system
 spec:
-  secretName: <nebariapp-name>-tls
+  secretName: <nebariapp-name>-<namespace>-tls
   dnsNames:
     - <hostname>
   issuerRef:

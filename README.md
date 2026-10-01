@@ -938,7 +938,7 @@ naming convention (usually `<release>-<chart-name>`).
 1. Check that `auth.enabled` is `true` in the NebariApp spec
 2. Check that the nebari-operator is running:
    ```bash
-   kubectl get pods -n nebari-system -l app=nebari-operator
+   kubectl get pods -n nebari-operator-system
    ```
 3. Check the NebariApp conditions:
    ```bash
@@ -962,14 +962,17 @@ Service (NIC sets these; `dev/configure-operator.sh` shows the kind equivalent).
 
 ### TLS certificate not provisioning
 
-1. Check cert-manager is running:
+1. Check the `TLSReady` reason. `ClusterIssuerNotConfigured` means the operator has
+   no `TLS_CLUSTER_ISSUER_NAME`; the app is then served by the Gateway's shared
+   listener and certificate.
+2. Check cert-manager is running:
    ```bash
    kubectl get pods -n cert-manager
    ```
-2. Check the Certificate resource:
+3. Check the Certificate resource. Certificates live in the Gateway's namespace:
    ```bash
-   kubectl get certificate -n my-pack
-   kubectl describe certificate my-pack-tls -n my-pack
+   kubectl get certificate -n envoy-gateway-system
+   kubectl describe certificate my-pack-my-pack-cert -n envoy-gateway-system
    ```
 
 ### No IdToken cookie in the app
@@ -981,7 +984,7 @@ Service (NIC sets these; `dev/configure-operator.sh` shows the kind equivalent).
    ```
 3. Check Envoy Gateway logs:
    ```bash
-   kubectl logs -n envoy-gateway-system -l app=envoy-gateway
+   kubectl logs -n envoy-gateway-system deploy/envoy-gateway
    ```
 
 ### `missing in charts/ directory: nebari-app`
