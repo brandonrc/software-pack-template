@@ -26,6 +26,9 @@ HOSTNAME      := my-pack.nebari.local
 CACHE_DIR     := .cache
 # Ref-specific so changing OPERATOR_REF never reuses scripts cloned for another version.
 OPERATOR_REPO = $(CACHE_DIR)/nebari-operator-$(OPERATOR_REF)
+# Pods cannot resolve keycloak.nebari.local, so apps that verify tokens fetch
+# Keycloak's signing keys from the in-cluster Service instead.
+KEYCLOAK_JWKS_URL := http://keycloak-keycloakx-http.keycloak.svc.cluster.local/auth/realms/nebari/protocol/openid-connect/certs
 
 # MetalLB IP pool configuration template.
 # METALLB_BASE_IP is substituted at runtime with the Kind network base.
@@ -178,8 +181,9 @@ up-fastapi: cluster
 		--set nebariapp.enabled=true \
 		--set nebariapp.hostname=$(HOSTNAME) \
 		--set nebariapp.auth.enabled=true \
-		--wait --timeout 2m
-	kubectl wait --for=condition=Ready nebariapp/my-pack-my-pack --timeout=120s
+		--set oidc.jwksURL=$(KEYCLOAK_JWKS_URL) \
+		--wait --timeout 3m
+	./verify-nebariapp.sh my-pack $(HOSTNAME) --auth
 	CLUSTER_NAME=$(CLUSTER_NAME) $(OPERATOR_REPO)/dev/scripts/networking/update-hosts.sh
 	@echo ""
 	@echo "FastAPI app deployed with NebariApp (auth enabled)."

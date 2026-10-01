@@ -157,11 +157,13 @@ software-pack-template/
       README.md
     auth-fastapi/                # Example 4: Custom app reading IdToken
       app/
-        main.py                  # FastAPI reading IdToken cookie
+        main.py                  # FastAPI verifying the IdToken cookie
         requirements.txt
         templates/index.html     # User info display
+      tests/                     # pytest suite for the token verification
       Dockerfile
-      chart/                     # Same structure as basic-nginx
+      chart/                     # basic-nginx structure, plus OIDC env wiring
+                                 # and an optional networkpolicy.yaml
       README.md
     wrap-existing-chart/         # Example 5: Wrapping podinfo via Helm
       chart/
@@ -414,26 +416,27 @@ See [examples/basic-nginx/README.md](examples/basic-nginx/README.md) for the ful
 ## Example 4: Helm - Auth-Aware Pack (FastAPI)
 
 A custom Python app that reads the IdToken cookie set by Envoy Gateway after
-Keycloak authentication. Shows how to consume authenticated user identity.
+Keycloak authentication. Shows how to consume authenticated user identity safely.
 
 **What it demonstrates:**
 - Building a custom container image
-- Reading the IdToken cookie to get user claims
+- Verifying the IdToken's signature, issuer and audience against Keycloak before
+  trusting any claim (Envoy Gateway does not verify it, and requests can reach the
+  app without passing the gateway)
+- Wiring the client ID and issuer from the operator's OIDC Secret in the chart
+- An optional NetworkPolicy that only lets the Envoy proxies reach the pods
 - Rendering user info (username, email, groups)
 
 The key code in `app/main.py`:
 
 ```python
-def get_id_token(request: Request) -> str | None:
-    """Extract IdToken from Envoy Gateway's OIDC filter cookies.
-
-    Envoy Gateway sets a cookie named IdToken-<suffix> where <suffix>
-    is an 8-char hex string derived from the SecurityPolicy UID.
-    """
-    for name, value in request.cookies.items():
-        if name.startswith("IdToken-"):
-            return value
-    return None
+claims = jwt.decode(
+    token,
+    jwks_client.get_signing_key_from_jwt(token).key,
+    algorithms=["RS256"],
+    audience=CLIENT_ID,   # client-id from <name>-oidc-client
+    issuer=ISSUER,        # issuer-url from <name>-oidc-client
+)
 ```
 
 ```bash
@@ -444,7 +447,8 @@ docker run -p 8000:8000 ghcr.io/nebari-dev/software-pack-template/auth-fastapi-e
 helm dependency build examples/auth-fastapi/chart/
 helm install my-pack examples/auth-fastapi/chart/ \
   --set nebariapp.enabled=true \
-  --set nebariapp.hostname=my-pack.nebari.example.com
+  --set nebariapp.hostname=my-pack.nebari.example.com \
+  --set networkPolicy.enabled=true
 ```
 
 See [examples/auth-fastapi/README.md](examples/auth-fastapi/README.md) for the full walkthrough.
@@ -531,10 +535,18 @@ Gateway SecurityPolicy that handles the full OIDC flow:
 - Creates an HTTPRoute directing traffic to your service
 - Provisions a TLS certificate via cert-manager
 
-**What your app can do:**
-- Read the `IdToken-*` cookies to get the JWT (see Example 4)
-- Decode the JWT payload to extract claims: `preferred_username`, `email`, `groups`
-- The JWT signature is already verified by Envoy Gateway - you only need to base64-decode the payload
+**What the operator does not do:**
+- Enforce `auth.groups`. Any user who can log in to the realm reaches the app
+  ([nebari-operator#153](https://github.com/nebari-dev/nebari-operator/issues/153)).
+- Verify the IdToken for your app. Envoy Gateway never checks the JWT signature,
+  and requests can reach the app without passing the gateway: from other pods,
+  and on `routing.publicRoutes` paths, which have no SecurityPolicy.
+
+**What your app must do before trusting an identity:**
+- Read the single `IdToken-*` cookie (see Example 4)
+- Verify its signature against Keycloak's JWKS, and check `iss`, `aud` and `exp`
+- Only then use claims such as `preferred_username`, `email` and `groups`, for
+  example to restrict access to a group
 
 **If your app handles OAuth natively** (like Grafana), set `enforceAtGateway: false`.
 The operator will still provision the OIDC client and store credentials in a Secret,
@@ -614,6 +626,7 @@ Runs on every push and PR. Validates all examples:
 - `helm lint` and `helm template` for each Helm chart (both NebariApp enabled and disabled)
 - Fails if any example chart renders a NebariApp without `spec.routing`
 - Fails if any ArgoCD Application example uses `project: default` (deny-all on NIC)
+- Runs the auth-fastapi token verification tests (`pytest`)
 
 ### Build Images (`build-images.yaml`)
 
@@ -656,9 +669,11 @@ infrastructure stack:
   `v0.1.0-alpha.20` (what NIC v0.14.0 deploys)
 - Configures the operator the way NIC does (`dev/configure-operator.sh`)
 - Deploys each example with NebariApp enabled and a `*.nebari.local` hostname
-- Verifies NebariApp reaches `Ready` condition (HTTPRoute created, TLS configured)
-- For auth-enabled examples (kustomize production, auth-fastapi), verifies
-  SecurityPolicy is created
+- Verifies `RoutingReady` and `TLSReady`, that the HTTPRoute exists, and that a real
+  HTTPS request through the Gateway succeeds (`dev/verify-nebariapp.sh`)
+- For auth-enabled examples, verifies `AuthReady`, the SecurityPolicy, and the
+  redirect to Keycloak; for auth-fastapi, logs in end to end and checks that forged
+  tokens sent around the gateway are rejected
 
 This catches bugs in NebariApp configuration, operator compatibility, and routing
 setup that the standalone test cannot detect.

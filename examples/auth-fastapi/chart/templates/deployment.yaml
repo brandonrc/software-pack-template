@@ -23,6 +23,29 @@ spec:
             - name: http
               containerPort: {{ .Values.service.targetPort }}
               protocol: TCP
+          {{- if and .Values.nebariapp.enabled .Values.nebariapp.auth.enabled }}
+          # The app verifies the IdToken itself; Envoy Gateway does not check its
+          # signature. Client ID and issuer come from the operator's OIDC Secret.
+          env:
+            - name: OIDC_CLIENT_ID
+              valueFrom:
+                secretKeyRef:
+                  name: {{ include "my-pack.fullname" . }}-oidc-client
+                  key: client-id
+            - name: OIDC_ISSUER_URL
+              {{- if .Values.oidc.issuerURL }}
+              value: {{ .Values.oidc.issuerURL | quote }}
+              {{- else }}
+              valueFrom:
+                secretKeyRef:
+                  name: {{ include "my-pack.fullname" . }}-oidc-client
+                  key: issuer-url
+              {{- end }}
+            {{- with .Values.oidc.jwksURL }}
+            - name: OIDC_JWKS_URL
+              value: {{ . | quote }}
+            {{- end }}
+          {{- end }}
           livenessProbe:
             httpGet:
               path: /health

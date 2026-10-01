@@ -28,7 +28,7 @@ resources: {}
 # Nebari Integration
 # =============================================================================
 # NebariApp CR (https://github.com/nebari-dev/nebari-operator).
-# Rendered through the official nebari-app.nebariApp template 
+# Rendered through the official nebari-app.nebariApp template
 # (https://github.com/nebari-dev/nebari-operator/tree/main/charts/nebari-app) with templating enabled.
 nebariapp:
   enabled: false
@@ -55,6 +55,24 @@ nebariapp:
       - profile
       - email
   gateway: public
+
+# =============================================================================
+# Token verification
+# =============================================================================
+# The app verifies the IdToken signature itself, because Envoy Gateway does not.
+# With nebariapp.auth.enabled, the client ID and issuer are read from the
+# operator-created <fullname>-oidc-client Secret. Override them when that
+# Secret's issuer-url is empty (operator running without KEYCLOAK_EXTERNAL_URL)
+# or when pods cannot reach the public Keycloak URL.
+oidc:
+  issuerURL: ""   # expected `iss` claim; defaults to the Secret's issuer-url
+  jwksURL: ""     # defaults to <issuer>/protocol/openid-connect/certs
+
+# Only allow the Envoy Gateway proxies to reach the app's pods. Requires a CNI
+# that enforces NetworkPolicy.
+networkPolicy:
+  enabled: false
+  gatewayNamespace: envoy-gateway-system
 
 # =============================================================================
 # Overrides

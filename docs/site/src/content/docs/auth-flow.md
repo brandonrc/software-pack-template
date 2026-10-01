@@ -122,34 +122,58 @@ For example: `IdToken-a1b2c3d4`, `AccessToken-a1b2c3d4`.
 Cookie names can be customized via the `cookieNames` field in the SecurityPolicy's
 OIDC configuration.
 
-### Reading the IdToken in your app
+### Reading user identity in your app
 
-Find the cookie starting with `IdToken-`:
+The IdToken is a JWT signed by Keycloak. **Verify its signature before you trust any claim
+in it.** Envoy Gateway does not do this for you:
+
+- Envoy's OAuth2 filter never checks the JWT signature. It reads the token only for its
+  expiry, and protects its own cookies with an HMAC.
+- Requests can reach your app without passing through that filter. The Service is
+  reachable from any pod in the cluster unless you add a NetworkPolicy, and paths listed
+  in `routing.publicRoutes` are served by an HTTPRoute with no SecurityPolicy attached.
+  A request on any of those paths can carry any `IdToken-*` cookie it likes.
+
+Verification needs three values, all available to your pod:
+
+| Value | Where it comes from |
+|-------|---------------------|
+| Client ID (the token's `aud`) | `client-id` key of the `<nebariapp-name>-oidc-client` Secret |
+| Issuer (the token's `iss`) | `issuer-url` key of the same Secret. It is empty unless the operator runs with `KEYCLOAK_EXTERNAL_URL`; in that case use the issuer your Keycloak puts in tokens. |
+| JWKS URL | Keycloak serves it at `<issuer>/protocol/openid-connect/certs`. Use the in-cluster Keycloak URL if your pods cannot reach the public one. |
+
+With [PyJWT](https://pyjwt.readthedocs.io/) (`PyJWT[crypto]>=2.10`):
 
 ```python
-for name, value in request.cookies.items():
-    if name.startswith("IdToken-"):
-        full_token = value
-        break
+import jwt
+
+jwks = jwt.PyJWKClient(JWKS_URL, cache_keys=True)
+
+
+def verified_claims(request) -> dict | None:
+    tokens = [v for k, v in request.cookies.items() if k.startswith("IdToken-")]
+    if len(tokens) != 1:  # none, or an extra cookie someone added
+        return None
+    try:
+        key = jwks.get_signing_key_from_jwt(tokens[0])
+        return jwt.decode(
+            tokens[0],
+            key.key,
+            algorithms=["RS256"],
+            audience=CLIENT_ID,
+            issuer=ISSUER,
+            options={"require": ["exp", "iss", "aud"]},
+        )
+    except jwt.PyJWTError:
+        return None
 ```
 
-### Decoding the JWT payload
+The [auth-fastapi example](https://github.com/nebari-dev/software-pack-template/tree/main/examples/auth-fastapi)
+does this end to end, including wiring the three values from the Secret in its Helm chart.
 
-The IdToken is a standard JWT with three base64url-encoded sections separated by dots:
-`header.payload.signature`
-
-Since Envoy Gateway already verified the signature, you can safely decode just the
-payload to extract claims:
-
-```python
-import base64, json
-
-parts = full_token.split(".")
-payload = parts[1]
-# Add base64 padding
-payload += "=" * (4 - len(payload) % 4)
-claims = json.loads(base64.urlsafe_b64decode(payload))
-```
+To keep traffic from bypassing the gateway entirely, also restrict ingress to your pods to
+the Envoy proxies. The auth-fastapi chart ships an optional NetworkPolicy for this
+(`networkPolicy.enabled: true`).
 
 ### Common JWT claims
 
@@ -198,8 +222,9 @@ metadata:
 data:
   client-id: <base64-encoded>       # Always present. Value: <namespace>-<nebariapp-name>
   client-secret: <base64-encoded>   # Always present. Cryptographically generated.
-  issuer-url: <base64-encoded>      # Present when external consumers are configured.
-                                    # Value: Keycloak issuer URL (e.g., https://keycloak.example.com/realms/nebari)
+  issuer-url: <base64-encoded>      # Always present. Empty unless the operator has
+                                    # KEYCLOAK_EXTERNAL_URL set; then the public issuer
+                                    # (e.g., https://keycloak.example.com/realms/nebari)
   spa-client-id: <base64-encoded>   # Present when spaClient is enabled.
   device-client-id: <base64-encoded> # Present when deviceFlowClient is enabled.
 ```
@@ -280,7 +305,7 @@ with the OAuth flow, such as mapping Keycloak groups/roles to app-internal roles
 ### Gateway-only auth (app reads JWT from cookies)
 
 If your app just needs user identity (not role mapping), use `enforceAtGateway: true`
-(the default) and read the IdToken cookie as described above.
+(the default) and read and verify the IdToken cookie as described above.
 
 ### App-native auth only (no gateway enforcement)
 

@@ -77,6 +77,9 @@ jobs:
       - name: Template wrap-existing-chart (NebariApp enabled)
         run: helm template test examples/wrap-existing-chart/chart/ --set nebariapp.enabled=true --set nebariapp.hostname=test.example.com
 
+      - name: Template auth-fastapi (NetworkPolicy enabled)
+        run: helm template test examples/auth-fastapi/chart/ --set nebariapp.enabled=true --set nebariapp.hostname=test.example.com --set networkPolicy.enabled=true | kubeconform -strict -ignore-missing-schemas
+
       # Without spec.routing the operator creates no HTTPRoute or TLS, yet the
       # NebariApp still reports Ready. Fail fast if an example chart drops it.
       - name: Every chart renders a NebariApp with routing
@@ -94,3 +97,18 @@ jobs:
           if grep -rn --include='*.md' -E '^\s*project:\s*default\b' README.md docs examples; then
             echo "ArgoCD Application examples must use 'project: nebari-apps'"; exit 1
           fi
+
+  app-tests:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v5
+
+      - uses: actions/setup-python@v6
+        with:
+          python-version: "3.12"
+
+      - name: Test auth-fastapi token verification
+        working-directory: examples/auth-fastapi
+        run: |
+          pip install -r app/requirements.txt -r tests/requirements.txt
+          pytest tests

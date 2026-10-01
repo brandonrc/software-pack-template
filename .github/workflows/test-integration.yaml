@@ -180,7 +180,7 @@ jobs:
         run: helm uninstall test-basic --wait || true
 
       # ============================================================
-      # Test: auth-fastapi (Helm, auth enabled)
+      # Test: auth-fastapi (Helm, auth enabled, full login)
       # ============================================================
       - name: "Deploy auth-fastapi"
         run: |
@@ -189,11 +189,33 @@ jobs:
             --set nebariapp.enabled=true \
             --set nebariapp.hostname=fastapi.nebari.local \
             --set nebariapp.auth.enabled=true \
-            --wait --timeout 2m
+            --set oidc.jwksURL=http://keycloak-keycloakx-http.keycloak.svc.cluster.local/auth/realms/nebari/protocol/openid-connect/certs \
+            --set networkPolicy.enabled=true \
+            --wait --timeout 3m
 
       - name: "Verify auth-fastapi"
         run: |
           dev/verify-nebariapp.sh test-fastapi-my-pack fastapi.nebari.local --auth
+          # Log in through Keycloak and check the app shows a verified identity
+          dev/login-test.sh fastapi.nebari.local
+
+      - name: "Verify auth-fastapi rejects forged tokens off the gateway"
+        run: |
+          # An unsigned token sent straight to the Service must not be trusted.
+          # With the NetworkPolicy on, the request should not connect at all;
+          # temporarily remove it to check the app's own verification as well.
+          FORGED='eyJhbGciOiJub25lIn0.eyJwcmVmZXJyZWRfdXNlcm5hbWUiOiJtYWxsb3J5In0.'
+          probe() {
+            kubectl run forged-probe --rm -i --restart=Never --quiet --image=curlimages/curl:8.11.1 -- \
+              sh -c "curl -s -m 5 -H 'Cookie: IdToken-a1b2c3d4=$FORGED' http://test-fastapi-my-pack.default.svc.cluster.local/; echo curl_exit=\$?"
+          }
+          out=$(probe || true)
+          echo "$out" | grep -q 'curl_exit=28' || { echo "NetworkPolicy did not block direct access"; echo "$out"; exit 1; }
+          kubectl delete networkpolicy test-fastapi-my-pack --wait
+          out=$(probe || true)
+          echo "$out" | grep -q 'could not be verified' || { echo "forged token was not rejected"; echo "$out"; exit 1; }
+          if echo "$out" | grep -q mallory; then echo "forged identity was displayed"; exit 1; fi
+          echo "forged token rejected"
 
       - name: "Cleanup auth-fastapi"
         if: always()

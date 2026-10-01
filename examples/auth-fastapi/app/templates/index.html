@@ -75,14 +75,16 @@
     </div>
     <p>
         This information was extracted from the <code>IdToken</code> cookie
-        set by Envoy Gateway after Keycloak authentication.
+        set by Envoy Gateway after Keycloak authentication, after verifying
+        its signature against Keycloak's signing keys.
     </p>
     {% else %}
     <div class="card not-authenticated">
         <h2>Not Authenticated</h2>
         <p>
-            No IdToken cookie found. This app reads authenticated user identity
-            from the IdToken cookie set by Envoy Gateway's OIDC filter.
+            {{ reason }} This app reads authenticated user identity from the
+            IdToken cookie set by Envoy Gateway's OIDC filter, and only trusts it
+            once the signature checks out.
         </p>
         <p>To see authentication in action:</p>
         <ol>

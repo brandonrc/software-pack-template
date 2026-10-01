@@ -133,18 +133,11 @@ The simplest possible Helm chart - nginx with a conditional NebariApp template a
 ### Example 4: Helm - Auth-Aware FastAPI
 
 A custom Python app that reads the `IdToken-*` cookie set by Envoy Gateway after
-Keycloak authentication. The key snippet:
-
-```python
-def get_id_token(request: Request) -> str | None:
-    for name, value in request.cookies.items():
-        if name.startswith("IdToken-"):
-            return value
-    return None
-```
-
-Shows how to extract and decode the JWT to get `preferred_username`, `email`, and
-`groups`.
+Keycloak authentication, verifies the JWT's signature, issuer and audience against
+Keycloak, and only then shows `preferred_username`, `email`, and `groups`. Envoy Gateway
+does not verify the token for you, and requests can reach the app without passing the
+gateway, so the verification is not optional. See
+[Reading user identity in your app](/auth-flow/#reading-user-identity-in-your-app).
 
 ### Example 5: Helm - Wrapping an Existing Chart (Podinfo)
 
