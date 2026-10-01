@@ -87,3 +87,10 @@ jobs:
             if [ "${routes:-0}" -lt 1 ]; then echo "$c: NebariApp has no spec.routing.routes"; exit 1; fi
             echo "$c: $routes route(s)"
           done
+
+      # NIC locks the "default" AppProject to deny-all; packs must use nebari-apps.
+      - name: ArgoCD examples use the nebari-apps project
+        run: |
+          if grep -rn --include='*.md' -E '^\s*project:\s*default\b' README.md docs examples; then
+            echo "ArgoCD Application examples must use 'project: nebari-apps'"; exit 1
+          fi

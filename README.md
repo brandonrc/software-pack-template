@@ -613,6 +613,7 @@ Runs on every push and PR. Validates all examples:
 - `kubectl kustomize` for each Kustomize overlay
 - `helm lint` and `helm template` for each Helm chart (both NebariApp enabled and disabled)
 - Fails if any example chart renders a NebariApp without `spec.routing`
+- Fails if any ArgoCD Application example uses `project: default` (deny-all on NIC)
 
 ### Build Images (`build-images.yaml`)
 
@@ -691,7 +692,7 @@ metadata:
   name: my-pack
   namespace: argocd
 spec:
-  project: default
+  project: nebari-apps   # NIC's AppProject for packs; "default" is deny-all
   source:
     repoURL: https://github.com/YOUR-ORG/YOUR-REPO.git
     targetRevision: main
@@ -712,6 +713,11 @@ spec:
       selfHeal: true
     syncOptions:
       - CreateNamespace=true
+    # The operator only reconciles NebariApps in namespaces labeled
+    # nebari.dev/managed=true. ArgoCD applies this to the namespace it creates.
+    managedNamespaceMetadata:
+      labels:
+        nebari.dev/managed: "true"
 ```
 
 **ArgoCD with Kustomize:**
@@ -723,7 +729,7 @@ metadata:
   name: my-pack
   namespace: argocd
 spec:
-  project: default
+  project: nebari-apps   # NIC's AppProject for packs; "default" is deny-all
   source:
     repoURL: https://github.com/YOUR-ORG/YOUR-REPO.git
     targetRevision: main
@@ -738,6 +744,11 @@ spec:
       selfHeal: true
     syncOptions:
       - CreateNamespace=true
+    # The operator only reconciles NebariApps in namespaces labeled
+    # nebari.dev/managed=true. ArgoCD applies this to the namespace it creates.
+    managedNamespaceMetadata:
+      labels:
+        nebari.dev/managed: "true"
 ```
 
 **ArgoCD with plain YAML (directory):**
@@ -749,7 +760,7 @@ metadata:
   name: my-pack
   namespace: argocd
 spec:
-  project: default
+  project: nebari-apps   # NIC's AppProject for packs; "default" is deny-all
   source:
     repoURL: https://github.com/YOUR-ORG/YOUR-REPO.git
     targetRevision: main
@@ -765,6 +776,11 @@ spec:
       selfHeal: true
     syncOptions:
       - CreateNamespace=true
+    # The operator only reconciles NebariApps in namespaces labeled
+    # nebari.dev/managed=true. ArgoCD applies this to the namespace it creates.
+    managedNamespaceMetadata:
+      labels:
+        nebari.dev/managed: "true"
 ```
 
 ### Option B: kubectl apply (plain YAML)

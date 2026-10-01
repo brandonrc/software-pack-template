@@ -248,6 +248,22 @@ kubectl label namespace my-pack nebari.dev/managed=true
 Without this label, the NebariApp will show `NamespaceNotOptedIn` and no resources
 will be created.
 
+When ArgoCD creates the namespace (`CreateNamespace=true`), have it apply the label too,
+so nobody has to run `kubectl` by hand:
+
+```yaml
+spec:
+  syncPolicy:
+    syncOptions:
+      - CreateNamespace=true
+    managedNamespaceMetadata:
+      labels:
+        nebari.dev/managed: "true"
+```
+
+ArgoCD only applies `managedNamespaceMetadata` to a namespace that the same Application
+creates. If the namespace already exists, label it yourself.
+
 ## Deployment Patterns
 
 The NebariApp resource can be included in your pack using any deployment method.

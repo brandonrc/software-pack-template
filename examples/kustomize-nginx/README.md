@@ -49,7 +49,7 @@ metadata:
   name: my-pack
   namespace: argocd
 spec:
-  project: default
+  project: nebari-apps   # NIC's AppProject for packs; "default" is deny-all
   source:
     repoURL: https://github.com/YOUR-ORG/YOUR-REPO.git
     targetRevision: main
@@ -63,6 +63,11 @@ spec:
       selfHeal: true
     syncOptions:
       - CreateNamespace=true
+    # The operator only reconciles NebariApps in namespaces labeled
+    # nebari.dev/managed=true. ArgoCD applies this to the namespace it creates.
+    managedNamespaceMetadata:
+      labels:
+        nebari.dev/managed: "true"
 ```
 
 ### kubectl apply -k
