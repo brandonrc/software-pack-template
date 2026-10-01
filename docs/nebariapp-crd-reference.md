@@ -4,8 +4,9 @@ Complete field-by-field reference for the NebariApp custom resource.
 
 **API Version:** `reconcilers.nebari.dev/v1`
 **Kind:** `NebariApp`
-**Source:** [nebari-operator/api/v1/nebariapp_types.go](https://github.com/nebari-dev/nebari-operator/blob/v0.1.0-alpha.19/api/v1/nebariapp_types.go)
-**Operator version this doc tracks:** `v0.1.0-alpha.19`
+**Source:** [nebari-operator/api/v1/nebariapp_types.go](https://github.com/nebari-dev/nebari-operator/blob/v0.1.1/api/v1/nebariapp_types.go)
+**Operator version this doc tracks:** `v0.1.1`. NIC v0.14.0 deploys `v0.1.0-alpha.20`; fields
+added after that release are marked *(v0.1.0+)*.
 
 ## Full Example
 

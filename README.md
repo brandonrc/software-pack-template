@@ -624,7 +624,9 @@ file. Tests each example with `nebariapp.enabled=true` on a full Nebari
 infrastructure stack:
 
 - Creates a kind cluster with MetalLB, Envoy Gateway, cert-manager, and Keycloak
-- Installs the nebari-operator from a pinned release (currently `v0.1.0-alpha.19`)
+- Runs once per operator version: `v0.1.1` (the release these docs track) and
+  `v0.1.0-alpha.20` (what NIC v0.14.0 deploys)
+- Configures the operator the way NIC does (`dev/configure-operator.sh`)
 - Deploys each example with NebariApp enabled and a `*.nebari.local` hostname
 - Verifies NebariApp reaches `Ready` condition (HTTPRoute created, TLS configured)
 - For auth-enabled examples (kustomize production, auth-fastapi), verifies

@@ -14,9 +14,16 @@ jobs:
   nebariapp-integration:
     runs-on: ubuntu-latest
     timeout-minutes: 45
+    strategy:
+      fail-fast: false
+      matrix:
+        # v0.1.1 is the release the template documents; v0.1.0-alpha.20 is what
+        # NIC v0.14.0 deploys, so packs are also proven on today's clusters.
+        operator-ref: [v0.1.1, v0.1.0-alpha.20]
+    name: nebariapp-integration (${{ matrix.operator-ref }})
     env:
       CLUSTER_NAME: pack-integration
-      OPERATOR_REF: v0.1.0-alpha.19
+      OPERATOR_REF: ${{ matrix.operator-ref }}
     steps:
       - name: Checkout software-pack-template
         uses: actions/checkout@v5

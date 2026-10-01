@@ -23,7 +23,8 @@ CHART_PODINFO := ../examples/wrap-existing-chart/chart
 CLUSTER_NAME  := my-pack-dev
 HOSTNAME      := my-pack.nebari.local
 CACHE_DIR     := .cache
-OPERATOR_REPO := $(CACHE_DIR)/nebari-operator
+# Ref-specific so changing OPERATOR_REF never reuses scripts cloned for another version.
+OPERATOR_REPO = $(CACHE_DIR)/nebari-operator-$(OPERATOR_REF)
 
 # MetalLB IP pool configuration template.
 # METALLB_BASE_IP is substituted at runtime with the Kind network base.
@@ -68,7 +69,7 @@ _cluster-create: _clone-operator _kind-create _metallb _services _keycloak-setup
 	@echo ""
 	@echo "Run 'make up-basic' (or any up-* target) to deploy an example."
 
-OPERATOR_REF := v0.1.0-alpha.19
+OPERATOR_REF ?= v0.1.1
 
 _clone-operator:
 	@if [ ! -d "$(OPERATOR_REPO)" ]; then \
