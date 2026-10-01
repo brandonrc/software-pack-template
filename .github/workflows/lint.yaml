@@ -65,8 +65,8 @@ jobs:
         run: helm template test examples/auth-fastapi/chart/ --set nebariapp.enabled=true --set nebariapp.hostname=test.example.com
 
       # Wrap existing chart (Podinfo) Helm example
-      - name: Update podinfo dependency
-        run: helm dependency update examples/wrap-existing-chart/chart/
+      - name: Build wrap-existing-chart dependencies
+        run: helm dependency build examples/wrap-existing-chart/chart/
 
       - name: Lint wrap-existing-chart
         run: helm lint examples/wrap-existing-chart/chart/
@@ -76,3 +76,14 @@ jobs:
 
       - name: Template wrap-existing-chart (NebariApp enabled)
         run: helm template test examples/wrap-existing-chart/chart/ --set nebariapp.enabled=true --set nebariapp.hostname=test.example.com
+
+      # Without spec.routing the operator creates no HTTPRoute or TLS, yet the
+      # NebariApp still reports Ready. Fail fast if an example chart drops it.
+      - name: Every chart renders a NebariApp with routing
+        run: |
+          for c in basic-nginx auth-fastapi wrap-existing-chart; do
+            routes=$(helm template test examples/$c/chart/ --set nebariapp.enabled=true --set nebariapp.hostname=test.example.com \
+              | yq 'select(.kind == "NebariApp") | .spec.routing.routes | length')
+            if [ "${routes:-0}" -lt 1 ]; then echo "$c: NebariApp has no spec.routing.routes"; exit 1; fi
+            echo "$c: $routes route(s)"
+          done

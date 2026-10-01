@@ -175,6 +175,10 @@ software-pack-template/
       README.md
   dev/
     Makefile                     # Local dev with full Nebari stack on kind
+    configure-operator.sh        # Configures the operator the way NIC does
+    keycloak-route.yaml          # Exposes Keycloak at keycloak.nebari.local
+    verify-nebariapp.sh          # Checks an app is served, not just Ready
+    login-test.sh                # Logs in with curl and checks the app
     .cache/                      # (gitignored) Cloned nebari-operator scripts
   docs/
     nebariapp-crd-reference.md   # Full NebariApp field reference
@@ -208,7 +212,8 @@ spec:
     name: my-pack           # Service name in the same namespace
     port: 80                # Service port (1-65535)
 
-  # Optional: path-based routing rules
+  # Routing: required in practice. Without it the operator creates no
+  # HTTPRoute and no TLS, yet the NebariApp still reports Ready.
   routing:
     routes:
       - pathPrefix: /       # Match all paths (default behavior)
@@ -263,6 +268,11 @@ To render the NebariApp in a Helm chart with the official
      service:
        name: '{{ include "my-pack.fullname" . | toJson }}'
        port: '{{ .Values.service.port }}'
+     routing:
+       routes:
+         - pathPrefix: /
+       tls:
+         enabled: true
    ```
 
 3. Render it in `templates/nebariapp.yaml`. The `if` makes the NebariApp optional,
@@ -469,13 +479,18 @@ nebariapp:
   service:
     name: '{{ printf "%s-podinfo" .Release.Name | toJson }}'   # Upstream service
     port: 9898
+  routing:
+    routes:
+      - pathPrefix: /
+    tls:
+      enabled: true
 ```
 
 **You don't rewrite the app. You just connect it to Nebari.**
 
 ```bash
 # Build dependencies
-helm dependency update examples/wrap-existing-chart/chart/
+helm dependency build examples/wrap-existing-chart/chart/
 
 # Deploy standalone
 helm install test-wrap examples/wrap-existing-chart/chart/
@@ -597,6 +612,7 @@ Runs on every push and PR. Validates all examples:
 - `kubectl apply --dry-run=client` for the vanilla YAML example
 - `kubectl kustomize` for each Kustomize overlay
 - `helm lint` and `helm template` for each Helm chart (both NebariApp enabled and disabled)
+- Fails if any example chart renders a NebariApp without `spec.routing`
 
 ### Build Images (`build-images.yaml`)
 
@@ -791,7 +807,8 @@ kubectl describe nebariapp my-pack -n my-pack
 #   RoutingReady: True    - HTTPRoute created
 #   TLSReady: True        - Certificate provisioned
 #   AuthReady: True       - SecurityPolicy created (if auth enabled)
-#   Ready: True           - All components ready
+#   Ready: True           - Core checks passed. Does NOT wait for the others:
+#                           a NebariApp with no routing is Ready and unreachable.
 ```
 
 ## Customizing for Your Own Application
@@ -943,13 +960,13 @@ The Helm examples depend on the `nebari-app` chart. Fetch it before installing:
 helm dependency build examples/basic-nginx/chart/
 ```
 
-### `helm dependency update` fails
+### `helm dependency build` fails
 
 The dependencies are pulled from OCI registries, so ensure Helm 3.8+ is installed:
 
 ```bash
 helm version
-helm dependency update examples/wrap-existing-chart/chart/
+helm dependency build examples/wrap-existing-chart/chart/
 ```
 
 ## Documentation Portal

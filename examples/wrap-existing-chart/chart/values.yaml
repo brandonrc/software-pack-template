@@ -14,6 +14,14 @@ nebariapp:
     # Points to the upstream podinfo chart's service
     name: '{{ include "my-pack.podinfo-service-name" . | toJson }}'
     port: 9898
+  # Without a routing block the operator creates no HTTPRoute and no TLS
+  # certificate, and the NebariApp still reports Ready. Keep at least one route.
+  routing:
+    routes:
+      - pathPrefix: /
+        pathType: PathPrefix
+    tls:
+      enabled: true
   auth:
     enabled: false
     provider: keycloak

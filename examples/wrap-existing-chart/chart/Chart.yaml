@@ -2,7 +2,7 @@ apiVersion: v2
 name: my-pack
 description: A Nebari Software Pack wrapping Podinfo
 type: application
-version: 0.1.1
+version: 0.1.2
 appVersion: "6.10.1"
 dependencies:
   - name: nebari-app

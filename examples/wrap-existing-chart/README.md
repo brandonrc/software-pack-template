@@ -88,7 +88,7 @@ To override upstream values via ArgoCD:
 
 ```bash
 # Build dependencies first
-helm dependency update ./chart/
+helm dependency build ./chart/
 
 # Deploy on Nebari
 helm install my-pack ./chart/ \
@@ -105,7 +105,7 @@ helm install my-pack ./chart/ \
 ## Local development (standalone, no Nebari)
 
 ```bash
-helm dependency update ./chart/
+helm dependency build ./chart/
 helm install test-wrap ./chart/
 
 # Access via port-forward

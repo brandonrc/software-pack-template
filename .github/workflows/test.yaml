@@ -116,8 +116,8 @@ jobs:
         run: helm uninstall test-fastapi -n test-fastapi --wait
 
       # Test podinfo wrapper Helm example
-      - name: Update podinfo dependency
-        run: helm dependency update examples/wrap-existing-chart/chart/
+      - name: Build wrap-existing-chart dependencies
+        run: helm dependency build examples/wrap-existing-chart/chart/
 
       - name: Install wrap-existing-chart
         run: |

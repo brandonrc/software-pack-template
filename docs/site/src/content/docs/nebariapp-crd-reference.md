@@ -64,7 +64,7 @@ spec:
 |-------|------|----------|---------|-------------|
 | `hostname` | string | Yes | - | FQDN where the app will be accessible. Used to generate the HTTPRoute and TLS certificate. Must match pattern `^[a-z0-9]([-a-z0-9]*[a-z0-9])?(\.[a-z0-9]([-a-z0-9]*[a-z0-9])?)*$`. |
 | `service` | [ServiceReference](#specservice) | Yes | - | The backend Kubernetes Service that receives traffic. |
-| `routing` | [RoutingConfig](#specrouting) | No | - | Routing behavior including path rules, TLS, and HTTPRoute annotations. **Omitting `routing` disables operator-managed routing entirely** - the operator skips HTTPRoute creation and cleans up any existing HTTPRoute. TLS is also considered disabled in that case. |
+| `routing` | [RoutingConfig](#specrouting) | No | - | Routing behavior including path rules, TLS, and HTTPRoute annotations. **Omitting `routing` disables operator-managed routing entirely** - the operator skips HTTPRoute creation and cleans up any existing HTTPRoute. TLS is also considered disabled in that case. The NebariApp still reports `Ready=True` (with `RoutingReady=False/RoutingNotConfigured`), so a pack without `routing` deploys cleanly and is unreachable through the gateway. Include at least `routes: [{pathPrefix: /}]`. |
 | `auth` | [AuthConfig](#specauth) | No | - | Authentication/authorization configuration. |
 | `gateway` | string | No | `"public"` | Which shared Gateway to use. Valid values: `public`, `internal`. |
 | `serviceAccountName` | string | No | NebariApp name | Name of the ServiceAccount used by the app's pods. The operator scopes RBAC on the OIDC client Secret to this ServiceAccount, so only the app's pods can read its credentials. |
@@ -267,6 +267,11 @@ spec:
   service:
     name: my-pack
     port: 80
+  routing:
+    routes:
+      - pathPrefix: /
+    tls:
+      enabled: true
 ```
 
 When deploying standalone (without Nebari), skip this file in your `kubectl apply`.

@@ -35,6 +35,14 @@ nebariapp:
   service:
     name: '{{ include "my-pack.fullname" . | toJson }}'
     port: '{{ .Values.service.port }}'
+  # Without a routing block the operator creates no HTTPRoute and no TLS
+  # certificate, and the NebariApp still reports Ready. Keep at least one route.
+  routing:
+    routes:
+      - pathPrefix: /
+        pathType: PathPrefix
+    tls:
+      enabled: true
   auth:
     enabled: false
     provider: keycloak

@@ -119,25 +119,25 @@ jobs:
             ghcr.io/nebari-dev/software-pack-template/auth-fastapi-example:latest \
             --name pack-integration
 
+      # Each "Verify" step waits for RoutingReady, TLSReady (and AuthReady with
+      # --auth), checks the generated HTTPRoute/SecurityPolicy exist, and sends a
+      # request through the Gateway. Ready=True alone is not enough: a NebariApp
+      # without spec.routing is Ready and unreachable.
+
       # ============================================================
       # Test: vanilla-yaml
       # ============================================================
       - name: "Deploy vanilla-yaml"
         run: |
-          # Apply deployment + service
           kubectl apply -f examples/vanilla-yaml/deployment.yaml \
                         -f examples/vanilla-yaml/service.yaml
-
-          # Apply nebariapp with hostname patched for nebari.local domain
           sed 's/my-pack.nebari.example.com/vanilla.nebari.local/' \
             examples/vanilla-yaml/nebariapp.yaml | kubectl apply -f -
 
-      - name: "Verify vanilla-yaml NebariApp"
+      - name: "Verify vanilla-yaml"
         run: |
           kubectl wait --for=condition=ready pod -l app=my-pack --timeout=120s
-          kubectl wait --for=condition=Ready nebariapp/my-pack --timeout=120s
-          kubectl get httproute -l app.kubernetes.io/managed-by=nebari-operator
-          echo "vanilla-yaml: NebariApp Ready"
+          dev/verify-nebariapp.sh my-pack vanilla.nebari.local
 
       - name: "Cleanup vanilla-yaml"
         if: always()
@@ -150,22 +150,16 @@ jobs:
       # Test: kustomize-nginx (production overlay - auth enabled)
       # ============================================================
       - name: "Deploy kustomize-nginx (production)"
-        run: |
-          kubectl apply -k examples/kustomize-nginx/overlays/production/
+        run: kubectl apply -k examples/kustomize-nginx/overlays/production/
 
-      - name: "Verify kustomize-nginx NebariApp"
+      - name: "Verify kustomize-nginx"
         run: |
           kubectl wait --for=condition=ready pod -l app=my-pack --timeout=120s
-          kubectl wait --for=condition=Ready nebariapp/my-pack --timeout=120s
-          kubectl get httproute -l app.kubernetes.io/managed-by=nebari-operator
-          # Production overlay has auth enabled - verify SecurityPolicy
-          kubectl get securitypolicy
-          echo "kustomize-nginx (production): NebariApp Ready with auth"
+          dev/verify-nebariapp.sh my-pack my-pack.nebari.example.com --auth
 
       - name: "Cleanup kustomize-nginx"
         if: always()
-        run: |
-          kubectl delete -k examples/kustomize-nginx/overlays/production/ --ignore-not-found --wait --timeout=60s
+        run: kubectl delete -k examples/kustomize-nginx/overlays/production/ --ignore-not-found --wait --timeout=60s
 
       # ============================================================
       # Test: basic-nginx (Helm, no auth)
@@ -178,12 +172,8 @@ jobs:
             --set nebariapp.hostname=basic.nebari.local \
             --wait --timeout 2m
 
-      - name: "Verify basic-nginx NebariApp"
-        run: |
-          kubectl wait --for=condition=ready pod -l app.kubernetes.io/instance=test-basic --timeout=120s
-          kubectl wait --for=condition=Ready nebariapp/test-basic-my-pack --timeout=120s
-          kubectl get httproute -l app.kubernetes.io/managed-by=nebari-operator
-          echo "basic-nginx: NebariApp Ready"
+      - name: "Verify basic-nginx"
+        run: dev/verify-nebariapp.sh test-basic-my-pack basic.nebari.local
 
       - name: "Cleanup basic-nginx"
         if: always()
@@ -201,14 +191,9 @@ jobs:
             --set nebariapp.auth.enabled=true \
             --wait --timeout 2m
 
-      - name: "Verify auth-fastapi NebariApp"
+      - name: "Verify auth-fastapi"
         run: |
-          kubectl wait --for=condition=ready pod -l app.kubernetes.io/instance=test-fastapi --timeout=120s
-          kubectl wait --for=condition=Ready nebariapp/test-fastapi-my-pack --timeout=120s
-          kubectl get httproute -l app.kubernetes.io/managed-by=nebari-operator
-          # Auth enabled - verify SecurityPolicy
-          kubectl get securitypolicy
-          echo "auth-fastapi: NebariApp Ready with auth"
+          dev/verify-nebariapp.sh test-fastapi-my-pack fastapi.nebari.local --auth
 
       - name: "Cleanup auth-fastapi"
         if: always()
@@ -219,20 +204,18 @@ jobs:
       # ============================================================
       - name: "Deploy wrap-existing-chart (podinfo)"
         run: |
-          helm dependency update examples/wrap-existing-chart/chart/
+          helm dependency build examples/wrap-existing-chart/chart/
           helm install test-wrap examples/wrap-existing-chart/chart/ \
             --set nebariapp.enabled=true \
             --set nebariapp.hostname=podinfo.nebari.local \
             --wait --timeout 3m
 
-      - name: "Verify wrap-existing-chart NebariApp"
+      - name: "Verify wrap-existing-chart"
         run: |
           # Podinfo's chart labels its pods with app.kubernetes.io/name=<release>-podinfo
           # and does not set app.kubernetes.io/instance, so wait on the Deployment instead.
           kubectl wait --for=condition=available deployment/test-wrap-podinfo --timeout=120s
-          kubectl wait --for=condition=Ready nebariapp/test-wrap-my-pack --timeout=120s
-          kubectl get httproute -l app.kubernetes.io/managed-by=nebari-operator
-          echo "wrap-existing-chart: NebariApp Ready"
+          dev/verify-nebariapp.sh test-wrap-my-pack podinfo.nebari.local
 
       - name: "Cleanup wrap-existing-chart"
         if: always()
@@ -254,11 +237,14 @@ jobs:
           kubectl get httproute -A || true
           echo ""
           echo "=== SecurityPolicies ==="
-          kubectl get securitypolicy -A || true
+          kubectl get securitypolicy -A -o yaml | grep -A6 'conditions:' || true
           echo ""
           echo "=== Operator logs ==="
           kubectl logs -n nebari-operator-system deployment/nebari-operator-controller-manager \
             --tail=100 || true
+          echo ""
+          echo "=== Envoy Gateway logs ==="
+          kubectl logs -n envoy-gateway-system deployment/envoy-gateway --tail=50 || true
           echo ""
           echo "=== Pods ==="
           kubectl get pods -A || true

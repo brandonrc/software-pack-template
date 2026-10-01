@@ -134,7 +134,7 @@ up-vanilla: cluster
 	sed 's/my-pack.nebari.example.com/$(HOSTNAME)/' \
 		$(VANILLA_DIR)/nebariapp.yaml | kubectl apply -f -
 	kubectl wait --for=condition=ready pod -l app=my-pack --timeout=120s
-	kubectl wait --for=condition=Ready nebariapp/my-pack --timeout=120s
+	./verify-nebariapp.sh my-pack $(HOSTNAME)
 	CLUSTER_NAME=$(CLUSTER_NAME) $(OPERATOR_REPO)/dev/scripts/networking/update-hosts.sh
 	@echo ""
 	@echo "Vanilla nginx deployed with NebariApp."
@@ -148,7 +148,7 @@ up-kustomize: cluster
 		| sed 's/my-pack.dev.nebari.example.com/$(HOSTNAME)/' \
 		| kubectl apply -f -
 	kubectl wait --for=condition=ready pod -l app=my-pack --timeout=120s
-	kubectl wait --for=condition=Ready nebariapp/my-pack --timeout=120s
+	./verify-nebariapp.sh my-pack $(HOSTNAME)
 	CLUSTER_NAME=$(CLUSTER_NAME) $(OPERATOR_REPO)/dev/scripts/networking/update-hosts.sh
 	@echo ""
 	@echo "Kustomize nginx deployed with NebariApp."
@@ -163,7 +163,7 @@ up-basic: cluster
 		--set nebariapp.enabled=true \
 		--set nebariapp.hostname=$(HOSTNAME) \
 		--wait --timeout 2m
-	kubectl wait --for=condition=Ready nebariapp/my-pack-my-pack --timeout=120s
+	./verify-nebariapp.sh my-pack $(HOSTNAME)
 	CLUSTER_NAME=$(CLUSTER_NAME) $(OPERATOR_REPO)/dev/scripts/networking/update-hosts.sh
 	@echo ""
 	@echo "Basic nginx deployed with NebariApp."
@@ -196,7 +196,7 @@ up-podinfo: cluster
 		--set nebariapp.enabled=true \
 		--set nebariapp.hostname=$(HOSTNAME) \
 		--wait --timeout 3m
-	kubectl wait --for=condition=Ready nebariapp/my-pack-my-pack --timeout=120s
+	./verify-nebariapp.sh my-pack $(HOSTNAME)
 	CLUSTER_NAME=$(CLUSTER_NAME) $(OPERATOR_REPO)/dev/scripts/networking/update-hosts.sh
 	@echo ""
 	@echo "Podinfo deployed with NebariApp."

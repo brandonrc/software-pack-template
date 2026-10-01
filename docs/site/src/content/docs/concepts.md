@@ -23,6 +23,7 @@ You typically make it conditional so the chart works both standalone and on Neba
     "metadata" (dict
       "name"      (include "my-pack.fullname" .)
       "namespace" .Release.Namespace
+      "labels"    (include "my-pack.labels" . | fromYaml)
     )
     "spec"   (omit .Values.nebariapp "enabled")
     "tplCtx" .
@@ -32,6 +33,10 @@ You typically make it conditional so the chart works both standalone and on Neba
 
 With plain YAML or Kustomize, the NebariApp manifest is always present. When deploying
 standalone, skip that file or exclude it from your apply command.
+
+Whichever method you use, give the NebariApp a `spec.routing` block with at least one
+route. Without it the operator creates no HTTPRoute and no TLS certificate, and the
+NebariApp still reports `Ready`, so the pack deploys cleanly and is unreachable.
 
 ## Deployment methods
 
@@ -92,6 +97,11 @@ nebariapp:
   service:
     name: '{{ printf "%s-podinfo" .Release.Name | toJson }}'   # upstream service name
     port: 9898
+  routing:
+    routes:
+      - pathPrefix: /
+    tls:
+      enabled: true
 ```
 
 `templates/nebariapp.yaml` is the same short `include` shown above. Run
