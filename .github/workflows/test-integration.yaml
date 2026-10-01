@@ -91,7 +91,7 @@ jobs:
         run: nebari-operator/dev/scripts/services/keycloak/setup.sh
 
       # ============================================================
-      # Install nebari-operator
+      # Install nebari-operator, configured the way NIC configures it
       # ============================================================
       - name: Install nebari-operator
         run: |
@@ -101,6 +101,9 @@ jobs:
         run: |
           kubectl wait --for=condition=available deployment/nebari-operator-controller-manager \
             -n nebari-operator-system --timeout=120s
+
+      - name: Configure nebari-operator and expose Keycloak
+        run: dev/configure-operator.sh
 
       - name: Label default namespace for operator
         run: kubectl label namespace default nebari.dev/managed=true --overwrite

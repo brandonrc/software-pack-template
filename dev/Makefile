@@ -4,7 +4,7 @@
 # (MetalLB, Envoy Gateway, cert-manager, Keycloak, nebari-operator)
 # so all examples deploy with NebariApp enabled.
 #
-# Prerequisites: docker, kind, helm, kubectl, git
+# Prerequisites: docker, kind, helm, kubectl, git, curl
 #
 # Usage:
 #   make up-vanilla    Deploy the vanilla YAML example
@@ -12,7 +12,8 @@
 #   make up-basic      Deploy the basic nginx Helm example
 #   make up-fastapi    Deploy the FastAPI Helm example (pre-built GHCR image)
 #   make up-podinfo    Deploy the podinfo wrapper Helm example
-#   make update-hosts  Update /etc/hosts with NebariApp hostnames
+#   make update-hosts  Update /etc/hosts with NebariApp and Keycloak hostnames
+#   make login-test    Log in to the FastAPI example with curl
 #   make down          Delete the kind cluster
 
 VANILLA_DIR   := ../examples/vanilla-yaml
@@ -49,7 +50,7 @@ spec:
 endef
 export METALLB_POOL
 
-.PHONY: up-vanilla up-kustomize up-basic up-fastapi up-podinfo down cluster update-hosts
+.PHONY: up-vanilla up-kustomize up-basic up-fastapi up-podinfo down cluster update-hosts login-test
 
 # --------------------------------------------------------------------------
 # cluster - create kind cluster with full Nebari infrastructure
@@ -61,7 +62,7 @@ cluster:
 		$(MAKE) _cluster-create; \
 	fi
 
-_cluster-create: _clone-operator _kind-create _metallb _services _keycloak-setup _operator _label-namespace
+_cluster-create: _clone-operator _kind-create _metallb _services _keycloak-setup _operator _configure-operator _label-namespace
 	@echo ""
 	@echo "=========================================="
 	@echo "Cluster setup complete!"
@@ -115,6 +116,11 @@ _operator:
 	kubectl wait --for=condition=available deployment/nebari-operator-controller-manager \
 		-n nebari-operator-system --timeout=120s
 	@echo "nebari-operator is running"
+
+# Set the operator env that NIC sets on real clusters and expose Keycloak at
+# keycloak.nebari.local. See configure-operator.sh for why each one matters.
+_configure-operator:
+	./configure-operator.sh
 
 _label-namespace:
 	kubectl label namespace default nebari.dev/managed=true --overwrite
@@ -179,6 +185,7 @@ up-fastapi: cluster
 	@echo "FastAPI app deployed with NebariApp (auth enabled)."
 	@echo "  https://$(HOSTNAME)"
 	@echo "  Keycloak login: admin / nebari-admin"
+	@echo "  Check the login flow from the terminal: make login-test"
 
 # --------------------------------------------------------------------------
 # up-podinfo - deploy podinfo wrapper Helm example with NebariApp
@@ -200,6 +207,14 @@ up-podinfo: cluster
 # --------------------------------------------------------------------------
 update-hosts:
 	CLUSTER_NAME=$(CLUSTER_NAME) $(OPERATOR_REPO)/dev/scripts/networking/update-hosts.sh
+	CLUSTER_NAME=$(CLUSTER_NAME) $(OPERATOR_REPO)/dev/scripts/networking/update-hosts.sh keycloak
+
+# --------------------------------------------------------------------------
+# login-test - log in to the FastAPI example with curl and check that the app
+# verified the token. Run after up-fastapi; needs no /etc/hosts entries.
+# --------------------------------------------------------------------------
+login-test:
+	./login-test.sh $(HOSTNAME)
 
 # --------------------------------------------------------------------------
 # down - delete the kind cluster

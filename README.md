@@ -535,7 +535,9 @@ The `dev/` directory provides a Makefile for local development with
 creates a kind cluster with the full Nebari infrastructure stack - MetalLB,
 Envoy Gateway, cert-manager, Keycloak, and the nebari-operator - so every
 example deploys with NebariApp enabled, routing, TLS, and authentication
-working just like a real Nebari cluster.
+working just like a real Nebari cluster. The operator is configured the way NIC
+configures it, and Keycloak is exposed at `keycloak.nebari.local`, so the full
+login works locally (user `admin`, password `nebari-admin`).
 
 The first `make up-*` run takes ~5-10 minutes (cluster and infrastructure
 setup). Subsequent runs reuse the existing cluster and are fast.
@@ -558,7 +560,10 @@ make up-podinfo
 # Deploy FastAPI Helm example (auth enabled, uses pre-built GHCR image)
 make up-fastapi
 
-# Update /etc/hosts with NebariApp hostnames
+# Log in to the FastAPI example with curl and check the app verified the token
+make login-test
+
+# Update /etc/hosts with NebariApp and Keycloak hostnames
 make update-hosts
 
 # Delete the kind cluster
@@ -566,8 +571,14 @@ make down
 ```
 
 Each `up-*` target deploys with NebariApp enabled at `https://my-pack.nebari.local`,
-waits for the NebariApp Ready condition, and updates `/etc/hosts` so you can access
-the app in your browser.
+checks that the app is actually served through the Gateway (`RoutingReady`,
+`TLSReady` and a real HTTPS request, not just `Ready`), and updates `/etc/hosts` so
+you can access the app in your browser. Run `make update-hosts` once to add
+`keycloak.nebari.local` too, so the browser can reach the login page. The dev CA is
+self-signed, so expect a certificate warning.
+
+The `/etc/hosts` steps use `sudo`. Everything else works without it:
+`make login-test` and `dev/verify-nebariapp.sh` resolve hostnames themselves.
 
 ### What's not included
 
@@ -885,6 +896,20 @@ naming convention (usually `<release>-<chart-name>`).
    kubectl describe nebariapp my-pack -n my-pack
    ```
    Look for `AuthReady` condition.
+
+### Every path returns 500 with auth enabled
+
+Envoy Gateway rejected the generated SecurityPolicy. Check its status:
+
+```bash
+kubectl get securitypolicy my-pack-security -n my-pack \
+  -o jsonpath='{range .status.ancestors[*].conditions[*]}{.type}={.status}: {.message}{"\n"}{end}'
+```
+
+`OIDC: error fetching endpoints from issuer` means the operator is pointing Envoy
+Gateway at the wrong in-cluster Keycloak URL. Set `KEYCLOAK_ISSUER_SERVICE_PORT` and
+`KEYCLOAK_ISSUER_CONTEXT_PATH` on the operator Deployment to match your Keycloak
+Service (NIC sets these; `dev/configure-operator.sh` shows the kind equivalent).
 
 ### TLS certificate not provisioning
 

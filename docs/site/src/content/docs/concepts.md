@@ -155,10 +155,17 @@ cd dev
 make up-vanilla    # deploy vanilla YAML example
 make up-kustomize  # deploy kustomize example (dev overlay)
 make up-basic      # deploy Helm nginx example
+make up-podinfo    # deploy the podinfo wrapper Helm example
 make up-fastapi    # deploy FastAPI Helm example (auth enabled)
-make update-hosts  # update /etc/hosts with NebariApp hostnames
+make login-test    # log in to the FastAPI example with curl
+make update-hosts  # update /etc/hosts with NebariApp and Keycloak hostnames
 make down          # delete the kind cluster
 ```
+
+Each `up-*` target checks that the app is actually served through the Gateway, not just
+that the NebariApp is `Ready`. The cluster configures the operator the way NIC does on a
+real Nebari cluster and exposes Keycloak at `keycloak.nebari.local`, so the full OIDC login
+works locally (user `admin`, password `nebari-admin`).
 
 The first `make up-*` run takes 5-10 minutes (cluster and infrastructure setup).
 Subsequent runs reuse the existing cluster and are fast.

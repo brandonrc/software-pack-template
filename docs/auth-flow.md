@@ -394,9 +394,10 @@ for the full set of OIDC fields.
 
 ## Limitations
 
-- **Local development:** The OIDC flow requires Keycloak and Envoy Gateway. When
-  developing locally with kind, set `nebariapp.enabled=false` and test without auth.
-  The FastAPI example shows "Not Authenticated" when no IdToken cookie is present.
+- **Local development:** The `dev/` Makefile builds a kind cluster with Keycloak, Envoy
+  Gateway, cert-manager and the operator, so you can test the full login flow locally:
+  `cd dev && make up-fastapi`, then log in with the Keycloak credentials it prints. The
+  FastAPI example shows "Not Authenticated" when no valid IdToken cookie is present.
 
 - **Token expiration:** Envoy Gateway handles token refresh automatically via refresh
   tokens stored in cookies. Your app does not need to handle token refresh.
