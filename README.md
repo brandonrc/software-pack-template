@@ -836,7 +836,9 @@ kubectl describe nebariapp my-pack -n my-pack
 
 # Expected conditions:
 #   RoutingReady: True    - HTTPRoute created
-#   TLSReady: True        - Certificate provisioned
+#   TLSReady: True        - Certificate provisioned (False/ClusterIssuerNotConfigured
+#                           if the operator has no ClusterIssuer; the shared
+#                           wildcard listener still serves HTTPS)
 #   AuthReady: True       - SecurityPolicy created (if auth enabled)
 #   Ready: True           - Core checks passed. Does NOT wait for the others:
 #                           a NebariApp with no routing is Ready and unreachable.

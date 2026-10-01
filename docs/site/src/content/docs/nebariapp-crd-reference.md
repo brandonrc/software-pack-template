@@ -102,6 +102,7 @@ Used in both `spec.routing.routes[]` and `spec.routing.publicRoutes[]`.
 | Field | Type | Required | Default | Description |
 |-------|------|----------|---------|-------------|
 | `enabled` | *bool | No | `true` | Whether to provision a TLS certificate via cert-manager and configure an HTTPS listener on the Gateway. When `false`, only HTTP listeners are used. |
+| `secretName` | string | No | - | *(v0.1.0-alpha.20+)* Name of a pre-existing `kubernetes.io/tls` Secret in `envoy-gateway-system` to use for the HTTPS listener instead of a cert-manager Certificate (for wildcard or externally managed certs). When set, the operator creates no Certificate and cleans up any it owns. You create and rotate the Secret. Ignored when `enabled` is `false`. Max 253 chars, DNS-subdomain format. |
 
 ## spec.auth
 
@@ -116,7 +117,7 @@ Used in both `spec.routing.routes[]` and `spec.routing.publicRoutes[]`.
 | `forwardAccessToken` | *bool | No | `false` | When `enforceAtGateway: true`, forward the user's OAuth access token to the upstream service via the `Authorization: Bearer <token>` header. Use when the app needs to read the JWT itself (e.g., to inspect the `groups` claim for per-user authorization). Without this, the gateway only stores the token in an encrypted session cookie that the backend cannot decode. |
 | `denyRedirect` | [][DenyRedirectHeader](#denyredirectheader) | No | - | Headers that, when matched, prevent the OIDC filter from redirecting to the IdP and instead return 401. Helps avoid PKCE race conditions when SPAs fire multiple parallel requests on page load. Only applies when `enforceAtGateway: true`. |
 | `redirectURI` | string | No | `"/oauth2/callback"` | OAuth2 callback path. The full URL is `https://<hostname><redirectURI>`. |
-| `clientSecretRef` | string | No | - | Name (string) of a Secret in the same namespace containing keys `client-id` and `client-secret`. **Note:** the spec field is a plain string (the Secret name), not the `{name, namespace}` object reference used by `status.clientSecretRef`. If omitted and `provisionClient` is true, the operator creates a Secret named `<nebariapp-name>-oidc-client` with keys: `client-id`, `client-secret`, and `issuer-url`. |
+| `clientSecretRef` | string | No | - | **Accepted by the API but ignored by operator v0.1.1.** The operator always reads and writes the Secret named `<nebariapp-name>-oidc-client` (keys `client-id`, `client-secret`, `issuer-url`). If you manage credentials yourself (`provisionClient: false`), create the Secret under that name. |
 | `scopes` | []string | No | `["openid", "profile", "email"]` | OIDC scopes to request during authentication. |
 | `groups` | []string | No | - | **Not enforced in v0.1.1.** The operator creates these groups in Keycloak and publishes them as `status.serviceDiscovery.requiredGroups` for the landing page, but the SecurityPolicy it generates contains no authorization rule, so any user who can log in to the realm reaches the app ([nebari-operator#153](https://github.com/nebari-dev/nebari-operator/issues/153)). To restrict access by group today, verify the token in your app and check its `groups` claim (see [Authentication Flow](/auth-flow/#reading-user-identity-in-your-app)). |
 | `issuerURL` | string | No | - | OIDC issuer URL. Required when `provider=generic-oidc`, ignored for `keycloak`. Example: `https://accounts.google.com`. |
@@ -179,12 +180,14 @@ Used in both `spec.routing.routes[]` and `spec.routing.publicRoutes[]`.
 | Field | Type | Required | Default | Description |
 |-------|------|----------|---------|-------------|
 | `enabled` | bool | No | `false` | Whether this service appears on the Nebari landing page. Set to `true` to opt in. |
-| `displayName` | string | No (required when enabled) | - | Human-readable name on the landing page. Max 64 chars. |
+| `displayName` | string | No | - | Human-readable name on the landing page. Max 64 chars. Set it whenever `enabled` is `true`; the operator does not reject a missing value. |
 | `description` | string | No | - | Supplementary text on the service card. Max 256 chars. |
-| `icon` | string | No | - | Icon identifier or URL. Built-in icons: `jupyter`, `grafana`, `prometheus`, `keycloak`, `argocd`, `kubernetes`. |
+| `icon` | string | No | - | Icon identifier or URL, shown in both light and dark mode unless `iconLight`/`iconDark` are set. Built-in icons: `jupyter`, `grafana`, `prometheus`, `keycloak`, `argocd`, `kubernetes`. |
+| `iconLight` | string | No | - | *(v0.1.0+)* URL of the icon shown when the UI is in light mode. Takes precedence over `icon`. |
+| `iconDark` | string | No | - | *(v0.1.0+)* URL of the icon shown when the UI is in dark mode. Takes precedence over `icon`. |
 | `category` | string | No | - | Group services together. Common categories: `Development`, `Monitoring`, `Platform`, `Data Science`. |
 | `priority` | *int | No | `100` | Sort order within a category (lower = higher priority). Range: 0-1000. |
-| `externalUrl` | string | No | `https://<hostname>` | Override the default URL. |
+| `externalUrl` | string | No | `https://<hostname>` (`http://` when `routing.tls.enabled: false`) | Override the default URL. |
 | `healthCheck` | [HealthCheckConfig](#speclandingpagehealthcheck) | No | - | Health-status monitoring for the service card. |
 
 ### spec.landingPage.healthCheck
@@ -208,24 +211,44 @@ The operator writes status conditions and several status fields for downstream c
 |-----------|-------------|
 | `RoutingReady` | HTTPRoute has been created and the Gateway is routing traffic. |
 | `TLSReady` | TLS certificate is provisioned and the HTTPS listener is configured. |
-| `AuthReady` | SecurityPolicy is created and the OIDC client is available. Only set when `auth.enabled=true`. |
-| `Ready` | Aggregate condition - all components are ready. |
+| `AuthReady` | SecurityPolicy is created and the OIDC client is available. `False` with reason `AuthDisabled` when auth is off. |
+| `Ready` | Set from the core checks (namespace label, Service, validation) and from hard reconcile failures. It does **not** wait for the other three: a NebariApp with `RoutingReady=False/RoutingNotConfigured` or `TLSReady=False/TLSDisabled` still reports `Ready=True`. Check the specific conditions you depend on. |
 
 ### Condition Reasons
 
-| Reason | Description |
-|--------|-------------|
-| `Available` | Resource is functioning correctly. |
-| `Reconciling` | Reconciliation is in progress. |
-| `ReconcileSuccess` | Reconciliation completed successfully. |
-| `ValidationSuccess` | Validation passed successfully. |
-| `Failed` | Reconciliation failed. |
-| `NamespaceNotOptedIn` | Namespace is missing the `nebari.dev/managed=true` label. |
-| `ServiceNotFound` | The referenced Service does not exist. |
-| `SecretNotFound` | The referenced Secret does not exist. |
-| `GatewayNotFound` | The target Gateway does not exist. |
-| `GatewayListenerConflict` | The per-app Gateway listener conflicts with another NebariApp on the same hostname. |
-| `CertificateNotReady` | The cert-manager Certificate is not yet ready. |
+These are the reasons the v0.1.1 controllers set, grouped by condition.
+
+| Condition | Reason | Meaning |
+|-----------|--------|---------|
+| `Ready` | `Reconciling` | Reconciliation is in progress. |
+| `Ready` | `ValidationSuccess` | Core validation passed. |
+| `Ready` | `ReconcileSuccess` | Reconciliation completed. Does not imply routing, TLS or auth are ready. |
+| `Ready` | `Failed` | A reconcile step failed; the message names it. |
+| `Ready` | `NamespaceNotOptedIn` | Namespace is missing the `nebari.dev/managed=true` label. |
+| `Ready` | `ServiceNotFound` | The referenced Service does not exist. |
+| `Ready` | `ResourceNameTooLong` | A generated resource name would exceed Kubernetes limits. Shorten the NebariApp name. |
+| `RoutingReady` | `HTTPRouteCreated` / `HTTPRouteReady` | The HTTPRoute exists and is configured. |
+| `RoutingReady` | `RoutingNotConfigured` | `spec.routing` is unset, so no HTTPRoute is created. |
+| `RoutingReady` | `BuildFailed` / `CreationFailed` / `UpdateFailed` | The HTTPRoute could not be built, created or updated. |
+| `TLSReady` | `TLSConfigured` | Certificate and HTTPS listener are in place. |
+| `TLSReady` | `TLSDisabled` | TLS is off: `routing.tls.enabled: false`, or `spec.routing` is unset. |
+| `TLSReady` | `ClusterIssuerNotConfigured` | The operator has no cert-manager ClusterIssuer configured and no `tls.secretName` was given. |
+| `TLSReady` | `CertificateNotReady` | The cert-manager Certificate exists but is not ready yet. |
+| `TLSReady` | `CertificateFailed` / `CertificateCheckFailed` / `CertificateCleanupFailed` | Creating, checking or removing the Certificate failed. |
+| `TLSReady` | `GatewayListenerFailed` | The per-app HTTPS listener could not be added to the Gateway. |
+| `TLSReady` | `GatewayListenerConflict` | Another NebariApp already owns a listener for this hostname. |
+| `TLSReady` | `UserProvidedSecretReady` | *(v0.1.0-alpha.20+)* The `tls.secretName` Secret exists and has type `kubernetes.io/tls`. |
+| `TLSReady` | `UserProvidedSecretNotFound` / `UserProvidedSecretInvalidType` | *(v0.1.0-alpha.20+)* The `tls.secretName` Secret is missing or is not `kubernetes.io/tls`. |
+| `TLSReady` | `UserProvidedSecretCheckFailed` | *(v0.1.0-alpha.20+)* The Secret could not be checked (transient API or RBAC error). |
+| `AuthReady` | `AuthConfigured` | OIDC client and SecurityPolicy are configured. |
+| `AuthReady` | `AuthDisabled` | `auth.enabled` is `false`. |
+| `AuthReady` | `InvalidProvider` / `ValidationFailed` | The auth configuration is invalid; the message says why. |
+| `AuthReady` | `ProvisioningFailed` / `ProvisioningNotSupported` | The OIDC client could not be provisioned, or the provider does not support provisioning. |
+| `AuthReady` | `RBACFailed` | The Role/RoleBinding for the OIDC Secret could not be created. |
+| `AuthReady` | `SecurityPolicyFailed` / `SecurityPolicyCleanupFailed` | Creating or removing the SecurityPolicy failed. |
+| `AuthReady` | `TokenExchangeFailed` | Token exchange policies could not be configured. |
+
+The API also defines `Available`, `SecretNotFound` and `GatewayNotFound`, but v0.1.1 never sets them.
 
 ### Status Fields
 
@@ -233,10 +256,10 @@ The operator writes status conditions and several status fields for downstream c
 |-------|------|-------------|
 | `observedGeneration` | int64 | Most recent `metadata.generation` observed by the controller. |
 | `hostname` | string | Mirror of `spec.hostname` for easy reference. |
-| `gatewayRef` | object `{name, namespace}` | The Gateway resource routing traffic to this app. |
-| `clientSecretRef` | object `{name, namespace}` | The Secret containing OIDC client credentials. |
+| `gatewayRef` | object `{name, namespace}` | Defined in the API but not written by v0.1.1. |
+| `clientSecretRef` | object `{name, namespace}` | Defined in the API but not written by v0.1.1. The Secret is always `<name>-oidc-client`. |
 | `authConfigHash` | string | SHA-256 hash of the last successfully provisioned OIDC client config. Used to skip re-provisioning when the spec is unchanged. To force re-provisioning, set the `nebari.dev/force-reprovision` annotation; the operator removes it once the forced re-provision completes. |
-| `serviceDiscovery` | object | URL-resolved view of `spec.landingPage` for the webapi/landing-page watcher. Includes `enabled`, `displayName`, `description`, `url`, `icon`, `category`, `priority`, `visibility`, `requiredGroups`. |
+| `serviceDiscovery` | object | URL-resolved view of `spec.landingPage` for the webapi/landing-page watcher. Includes `enabled`, `displayName`, `description`, `url`, `icon`, `iconLight`, `iconDark`, `category`, `priority`, `visibility`, `requiredGroups`. `requiredGroups` is informational; see `spec.auth.groups`. |
 
 ## Namespace Opt-In
 
@@ -365,10 +388,6 @@ nebariapp:
     enabled: false
     provider: keycloak
     provisionClient: true
-    scopes:
-      - openid
-      - profile
-      - email
   gateway: public
 ```
 
