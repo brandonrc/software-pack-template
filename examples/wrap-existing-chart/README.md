@@ -2,8 +2,8 @@
 
 This is the most realistic use case for a Helm-based Nebari Software Pack.
 Instead of writing your own Deployment and Service templates, you add an
-existing Helm chart as a dependency and create a NebariApp resource that points
-to its service.
+existing Helm chart as a dependency and point the NebariApp resource at its
+service.
 
 **Key lesson: You don't rewrite the app - you just connect it to Nebari.**
 
@@ -11,7 +11,7 @@ to its service.
 
 - Adding an upstream Helm chart as a `Chart.yaml` dependency
 - Overriding upstream values via your own `values.yaml`
-- Creating a NebariApp that points to the upstream chart's service
+- Pointing the NebariApp at the upstream chart's service from `values.yaml`
 - No custom Deployment or Service templates needed
 
 ## How It Works
@@ -19,18 +19,25 @@ to its service.
 ```
 Chart.yaml
   dependencies:
+    - name: nebari-app       # Official chart that provides the NebariApp template
+      repository: oci://quay.io/nebari/charts
     - name: podinfo          # Upstream chart handles pods + services
       version: 6.10.1
       repository: oci://ghcr.io/stefanprodan/charts
 
+values.yaml
+  nebariapp:                 # NebariApp spec: points to podinfo's service
+  podinfo:                   # Overrides passed to the podinfo chart
+
 templates/
-  nebariapp.yaml             # Points to podinfo's service -> Nebari routes to it
+  nebariapp.yaml             # Short include of the nebari-app template
   (no deployment.yaml!)      # Podinfo chart handles this
   (no service.yaml!)         # Podinfo chart handles this
 ```
 
-The only template you write is `nebariapp.yaml`. Everything else comes from the
-upstream chart.
+The only template you write is a short `nebariapp.yaml` that calls the
+[`nebari-app`](https://github.com/nebari-dev/nebari-operator/tree/main/charts/nebari-app)
+template. Everything else comes from the upstream chart or `values.yaml`.
 
 ## Deploying to Nebari
 
@@ -110,10 +117,10 @@ kubectl port-forward svc/test-wrap-podinfo 9898:9898
 
 | File | Purpose |
 |------|---------|
-| `chart/Chart.yaml` | Helm chart metadata with podinfo dependency |
+| `chart/Chart.yaml` | Helm chart metadata with podinfo and nebari-app dependencies |
 | `chart/values.yaml` | NebariApp config + podinfo overrides |
 | `chart/templates/_helpers.tpl` | Name, label, and selector helpers |
-| `chart/templates/nebariapp.yaml` | NebariApp CRD pointing to podinfo's service |
+| `chart/templates/nebariapp.yaml` | Renders the NebariApp via nebari-app |
 | `chart/templates/NOTES.txt` | Post-install instructions |
 
 ## Adapting for Your Own Chart

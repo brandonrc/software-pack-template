@@ -6,7 +6,8 @@ container with optional Nebari platform integration via the NebariApp CRD.
 ## What This Example Shows
 
 - Minimum viable Helm chart structure for a Nebari pack
-- The `nebariapp.yaml` template that creates a NebariApp custom resource
+- Rendering the NebariApp custom resource with the official
+  [`nebari-app` library chart](https://github.com/nebari-dev/nebari-operator/tree/main/charts/nebari-app)
 - How to toggle Nebari integration on/off with `nebariapp.enabled`
 - Health probes, service, and deployment boilerplate
 
@@ -65,6 +66,9 @@ This additionally creates:
 ### Helm install
 
 ```bash
+# Fetch the nebari-app dependency
+helm dependency build ./chart/
+
 # Deploy on Nebari
 helm install my-pack ./chart/ \
   --set nebariapp.enabled=true \
@@ -80,6 +84,7 @@ helm install my-pack ./chart/ \
 ## Local development (standalone, no Nebari)
 
 ```bash
+helm dependency build ./chart/
 helm install test-basic ./chart/
 
 # Access via port-forward
@@ -91,10 +96,10 @@ kubectl port-forward svc/test-basic-my-pack 8080:80
 
 | File | Purpose |
 |------|---------|
-| `chart/Chart.yaml` | Helm chart metadata |
-| `chart/values.yaml` | Default configuration values |
+| `chart/Chart.yaml` | Helm chart metadata with the nebari-app dependency |
+| `chart/values.yaml` | Default configuration values, including the NebariApp spec under `nebariapp:` |
 | `chart/templates/_helpers.tpl` | Name, label, and selector helpers |
-| `chart/templates/nebariapp.yaml` | NebariApp CRD (conditional on `nebariapp.enabled`) |
+| `chart/templates/nebariapp.yaml` | Renders the NebariApp via nebari-app (conditional on `nebariapp.enabled`) |
 | `chart/templates/deployment.yaml` | Kubernetes Deployment for nginx |
 | `chart/templates/service.yaml` | ClusterIP Service |
 | `chart/templates/NOTES.txt` | Post-install instructions |

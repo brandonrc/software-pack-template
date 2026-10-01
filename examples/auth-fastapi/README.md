@@ -66,6 +66,7 @@ spec:
 ### Helm install
 
 ```bash
+helm dependency build ./chart/
 helm install my-pack ./chart/ \
   --set nebariapp.enabled=true \
   --set nebariapp.hostname=my-pack.nebari.example.com \
@@ -117,10 +118,10 @@ an explanatory message when no IdToken is present.
 | `app/requirements.txt` | Python dependencies |
 | `app/templates/index.html` | HTML template for user info display |
 | `Dockerfile` | Multi-stage build for the FastAPI image |
-| `chart/Chart.yaml` | Helm chart metadata |
-| `chart/values.yaml` | Default config with auth enabled |
+| `chart/Chart.yaml` | Helm chart metadata with the nebari-app dependency |
+| `chart/values.yaml` | Default config, including the NebariApp spec with auth enabled |
 | `chart/templates/_helpers.tpl` | Name, label, and selector helpers |
-| `chart/templates/nebariapp.yaml` | NebariApp CRD with auth configuration |
+| `chart/templates/nebariapp.yaml` | Renders the NebariApp via nebari-app |
 | `chart/templates/deployment.yaml` | Kubernetes Deployment |
 | `chart/templates/service.yaml` | ClusterIP Service |
 | `chart/templates/NOTES.txt` | Post-install instructions |

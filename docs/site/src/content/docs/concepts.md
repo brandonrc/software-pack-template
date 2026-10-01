@@ -13,20 +13,20 @@ Every software pack has exactly one integration point with the Nebari platform: 
 automatically configures routing, TLS, and authentication.
 
 The NebariApp is just a Kubernetes resource - it can live in a plain YAML file, a
-Kustomize base, or a Helm template. In Helm charts, you typically make it conditional
-so the chart works both standalone and on Nebari:
+Kustomize base, or a Helm template. In Helm charts, render it with the template from the
+official [`nebari-app` library chart](https://github.com/nebari-dev/nebari-operator/tree/main/charts/nebari-app).
+You typically make it conditional so the chart works both standalone and on Nebari:
 
 ```yaml
 {{- if .Values.nebariapp.enabled }}
-apiVersion: reconcilers.nebari.dev/v1
-kind: NebariApp
-metadata:
-  name: {{ include "my-pack.fullname" . }}
-spec:
-  hostname: {{ required "nebariapp.hostname is required" .Values.nebariapp.hostname }}
-  service:
-    name: {{ include "my-pack.fullname" . }}
-    port: 80
+{{- include "nebari-app.nebariApp" (dict
+    "metadata" (dict
+      "name"      (include "my-pack.fullname" .)
+      "namespace" .Release.Namespace
+    )
+    "spec"   (omit .Values.nebariapp "enabled")
+    "tplCtx" .
+) -}}
 {{- end }}
 ```
 
@@ -70,29 +70,32 @@ Best for: packs deployed to multiple environments with known configuration diffe
 ### Helm
 
 Helm is the most common choice for packs that wrap existing upstream software. You add
-the upstream chart as a dependency and add a NebariApp template that points to its
-service - you do not rewrite the app.
+the upstream chart and `nebari-app` as dependencies, then point the NebariApp at the
+upstream service in `values.yaml` - you do not rewrite the app.
 
 ```yaml
-# Chart.yaml - add the upstream chart as a dependency
+# Chart.yaml - add the upstream chart next to nebari-app
 dependencies:
+  - name: nebari-app
+    repository: oci://quay.io/nebari/charts
+    version: ">=0.1.1"
   - name: podinfo
     version: 6.10.1
     repository: oci://ghcr.io/stefanprodan/charts
 ```
 
 ```yaml
-# templates/nebariapp.yaml - the only template you write
-{{- if .Values.nebariapp.enabled }}
-apiVersion: reconcilers.nebari.dev/v1
-kind: NebariApp
-spec:
-  hostname: {{ .Values.nebariapp.hostname }}
+# values.yaml - the NebariApp spec
+nebariapp:
+  enabled: false
+  hostname: '{{ fail "nebariapp.hostname is required when nebariapp.enabled is true" }}'
   service:
-    name: {{ .Release.Name }}-podinfo   # upstream service name
+    name: '{{ printf "%s-podinfo" .Release.Name | toJson }}'   # upstream service name
     port: 9898
-{{- end }}
 ```
+
+`templates/nebariapp.yaml` is the same short `include` shown above. Run
+`helm dependency build` before installing.
 
 Best for: wrapping existing Helm charts and for packs with rich configuration needs.
 

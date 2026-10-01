@@ -2,5 +2,9 @@ apiVersion: v2
 name: my-pack
 description: A Nebari Software Pack (replace with your description)
 type: application
-version: 0.1.0
+version: 0.1.1
 appVersion: "1.0.0"
+dependencies:
+  - name: nebari-app
+    repository: oci://quay.io/nebari/charts
+    version: ">=0.1.1"

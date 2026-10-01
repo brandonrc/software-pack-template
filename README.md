@@ -105,7 +105,8 @@ For local development (optional):
                  -f examples/vanilla-yaml/service.yaml
    kubectl port-forward svc/my-pack 8080:80
 
-   # Or with Helm
+   # Or with Helm (fetch the nebari-app dependency first)
+   helm dependency build examples/basic-nginx/chart/
    helm install test examples/basic-nginx/chart/
    kubectl port-forward svc/test-my-pack 8080:80
 
@@ -144,11 +145,12 @@ software-pack-template/
       README.md
     basic-nginx/                 # Example 3: Simplest Helm chart
       chart/
-        Chart.yaml
-        values.yaml
+        Chart.yaml               # Has nebari-app as a dependency
+        Chart.lock
+        values.yaml              # NebariApp config under nebariapp:
         templates/
           _helpers.tpl           # Name, label, selector helpers
-          nebariapp.yaml         # NebariApp CRD (conditional)
+          nebariapp.yaml         # Renders the NebariApp via nebari-app (conditional)
           deployment.yaml        # Kubernetes Deployment
           service.yaml           # ClusterIP Service
           NOTES.txt              # Post-install instructions
@@ -163,12 +165,12 @@ software-pack-template/
       README.md
     wrap-existing-chart/         # Example 5: Wrapping podinfo via Helm
       chart/
-        Chart.yaml               # Has podinfo as a dependency
+        Chart.yaml               # Has podinfo and nebari-app as dependencies
         Chart.lock
         values.yaml              # Podinfo overrides + NebariApp config
         templates/
           _helpers.tpl
-          nebariapp.yaml         # Points to podinfo's service
+          nebariapp.yaml         # Renders the NebariApp via nebari-app
           NOTES.txt
       README.md
   dev/
@@ -233,19 +235,59 @@ spec:
 ```
 
 The NebariApp is just a Kubernetes resource. It can live in a plain YAML file, a
-Kustomize base, or a Helm template. In Helm charts, you can make the NebariApp
-conditional so the chart works both standalone and on Nebari:
-
-```yaml
-{{- if .Values.nebariapp.enabled }}
-apiVersion: reconcilers.nebari.dev/v1
-kind: NebariApp
-...
-{{- end }}
-```
+Kustomize base, or a Helm template.
 
 With plain YAML or Kustomize, the NebariApp manifest is always present. When
 deploying standalone, simply skip that file or exclude it from your apply command.
+
+### NebariApp in Helm charts
+
+To render the NebariApp in a Helm chart with the official
+[`nebari-app` library chart](https://github.com/nebari-dev/nebari-operator/tree/main/charts/nebari-app):
+
+1. Add it as a dependency in `Chart.yaml`, then run `helm dependency build`:
+
+   ```yaml
+   dependencies:
+     - name: nebari-app
+       repository: oci://quay.io/nebari/charts
+       version: ">=0.1.1"
+   ```
+
+2. Set any NebariApp `spec` field under `nebariapp:` in `values.yaml`:
+
+   ```yaml
+   nebariapp:
+     enabled: false
+     hostname: '{{ fail "nebariapp.hostname is required when nebariapp.enabled is true" }}'
+     service:
+       name: '{{ include "my-pack.fullname" . | toJson }}'
+       port: '{{ .Values.service.port }}'
+   ```
+
+3. Render it in `templates/nebariapp.yaml`. The `if` makes the NebariApp optional,
+   so the chart works both standalone and on Nebari:
+
+   ```yaml
+   {{- if .Values.nebariapp.enabled }}
+   {{- include "nebari-app.nebariApp" (dict
+       "metadata" (dict
+         "name"      (include "my-pack.fullname" .)
+         "namespace" .Release.Namespace
+         "labels"    (include "my-pack.labels" . | fromYaml)
+       )
+       "spec"   (omit .Values.nebariapp "enabled")
+       "tplCtx" .
+   ) -}}
+   {{- end }}
+   ```
+
+When a `{{ ... }}` value renders a string, add `| toJson` at the end. It wraps the string in quotes so it's valid JSON:
+
+```yaml
+name: '{{ include "my-pack.fullname" . | toJson }}'   # works
+name: '{{ include "my-pack.fullname" . }}'            # fails to render
+```
 
 ### Beyond the basics
 
@@ -329,7 +371,7 @@ See [examples/kustomize-nginx/README.md](examples/kustomize-nginx/README.md) for
 ## Example 3: Helm - Basic Pack (Nginx)
 
 The simplest possible Helm-based pack. Deploys a stock nginx container with
-optional Nebari integration via a conditional NebariApp template.
+optional Nebari integration via the `nebari-app` library chart.
 
 **What it demonstrates:**
 - Minimum viable Helm chart structure
@@ -337,6 +379,9 @@ optional Nebari integration via a conditional NebariApp template.
 - Toggling between standalone and Nebari modes
 
 ```bash
+# Fetch the nebari-app dependency
+helm dependency build examples/basic-nginx/chart/
+
 # Deploy standalone
 helm install test-basic examples/basic-nginx/chart/
 kubectl port-forward svc/test-basic-my-pack 8080:80
@@ -386,6 +431,7 @@ def get_id_token(request: Request) -> str | None:
 docker run -p 8000:8000 ghcr.io/nebari-dev/software-pack-template/auth-fastapi-example:latest
 
 # Deploy on Nebari with auth
+helm dependency build examples/auth-fastapi/chart/
 helm install my-pack examples/auth-fastapi/chart/ \
   --set nebariapp.enabled=true \
   --set nebariapp.hostname=my-pack.nebari.example.com
@@ -397,8 +443,7 @@ See [examples/auth-fastapi/README.md](examples/auth-fastapi/README.md) for the f
 
 **This is the most realistic Helm use case.** Most Helm-based packs wrap
 existing software - you don't write your own Deployment or Service. You add
-the upstream chart as a dependency and create a NebariApp that points to its
-service.
+the upstream chart as a dependency and point the NebariApp at its service.
 
 **What it demonstrates:**
 - Chart.yaml dependency on an existing chart
@@ -407,19 +452,22 @@ service.
 - No custom Deployment or Service templates needed
 
 ```yaml
-# Chart.yaml - just add the dependency
+# Chart.yaml - add the upstream chart next to nebari-app
 dependencies:
+  - name: nebari-app
+    repository: oci://quay.io/nebari/charts
+    version: ">=0.1.1"
   - name: podinfo
     version: 6.10.1
     repository: oci://ghcr.io/stefanprodan/charts
 ```
 
-The only template you write is `nebariapp.yaml`, which points to podinfo's service:
+The NebariApp points to podinfo's service from `values.yaml`:
 
 ```yaml
-spec:
+nebariapp:
   service:
-    name: {{ .Release.Name }}-podinfo   # Upstream service
+    name: '{{ printf "%s-podinfo" .Release.Name | toJson }}'   # Upstream service
     port: 9898
 ```
 
@@ -708,6 +756,7 @@ kubectl apply -k examples/kustomize-nginx/overlays/production/ \
 ### Option D: Helm install
 
 ```bash
+helm dependency build ./chart/
 helm install my-pack ./chart/ \
   --namespace my-pack \
   --create-namespace \
@@ -859,9 +908,17 @@ naming convention (usually `<release>-<chart-name>`).
    kubectl logs -n envoy-gateway-system -l app=envoy-gateway
    ```
 
-### `helm dependency update` fails for wrapped charts
+### `missing in charts/ directory: nebari-app`
 
-For OCI-based dependencies, ensure Helm 3.8+ is installed:
+The Helm examples depend on the `nebari-app` chart. Fetch it before installing:
+
+```bash
+helm dependency build examples/basic-nginx/chart/
+```
+
+### `helm dependency update` fails
+
+The dependencies are pulled from OCI registries, so ensure Helm 3.8+ is installed:
 
 ```bash
 helm version

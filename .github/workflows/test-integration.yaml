@@ -162,6 +162,7 @@ jobs:
       # ============================================================
       - name: "Deploy basic-nginx"
         run: |
+          helm dependency build examples/basic-nginx/chart/
           helm install test-basic examples/basic-nginx/chart/ \
             --set nebariapp.enabled=true \
             --set nebariapp.hostname=basic.nebari.local \
@@ -183,6 +184,7 @@ jobs:
       # ============================================================
       - name: "Deploy auth-fastapi"
         run: |
+          helm dependency build examples/auth-fastapi/chart/
           helm install test-fastapi examples/auth-fastapi/chart/ \
             --set nebariapp.enabled=true \
             --set nebariapp.hostname=fastapi.nebari.local \
