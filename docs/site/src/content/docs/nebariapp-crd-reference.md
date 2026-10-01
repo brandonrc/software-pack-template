@@ -388,6 +388,10 @@ nebariapp:
     enabled: false
     provider: keycloak
     provisionClient: true
+    scopes:
+      - openid
+      - profile
+      - email
   gateway: public
 ```
 
