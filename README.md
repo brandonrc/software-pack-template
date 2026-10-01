@@ -139,7 +139,7 @@ software-pack-template/
         dev/                     # Dev overlay: dev hostname, no auth
           kustomization.yaml
           nebariapp-patch.yaml
-        production/              # Prod overlay: prod hostname, auth + groups
+        production/              # Prod overlay: prod hostname, auth enabled
           kustomization.yaml
           nebariapp-patch.yaml
       README.md
@@ -231,7 +231,7 @@ spec:
       - openid
       - profile
       - email
-    groups:                         # Restrict to specific groups (optional)
+    groups:                         # NOT enforced by the gateway in v0.1.1; see below
       - admin
     enforceAtGateway: true          # Create SecurityPolicy at gateway (default: true)
 
@@ -372,7 +372,7 @@ kubectl kustomize examples/kustomize-nginx/overlays/dev/
 # Deploy the dev overlay on Nebari
 kubectl apply -k examples/kustomize-nginx/overlays/dev/
 
-# Deploy the production overlay (auth enabled, group-restricted)
+# Deploy the production overlay (auth enabled)
 kubectl apply -k examples/kustomize-nginx/overlays/production/
 ```
 
@@ -886,14 +886,15 @@ routing:
 
 ### Restricting access to specific groups
 
-```yaml
-# In the NebariApp spec (any deployment method)
-auth:
-  enabled: true
-  groups:
-    - admin
-    - data-science-team
-```
+`auth.groups` does **not** restrict access in operator v0.1.1. The operator
+creates the groups in Keycloak and lists them on the landing page, but the
+SecurityPolicy it generates has no authorization rule, so every user who can log
+in to the realm reaches the app
+([nebari-operator#153](https://github.com/nebari-dev/nebari-operator/issues/153)).
+
+Until that is fixed, check group membership in your app: verify the IdToken (see
+Example 4 and [docs/auth-flow.md](docs/auth-flow.md)) and reject users whose
+`groups` claim doesn't include the group you need.
 
 ## Troubleshooting
 

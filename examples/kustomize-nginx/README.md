@@ -18,7 +18,7 @@ kustomize-nginx/
       nebariapp-patch.yaml # Dev hostname, auth disabled
     production/
       kustomization.yaml   # Patches base for production
-      nebariapp-patch.yaml # Production hostname, auth enabled with groups
+      nebariapp-patch.yaml # Production hostname, auth enabled
 ```
 
 ## When to use this approach
@@ -76,7 +76,7 @@ spec:
 # Dev environment (auth disabled)
 kubectl apply -k examples/kustomize-nginx/overlays/dev/
 
-# Production environment (auth enabled, restricted to groups)
+# Production environment (auth enabled)
 kubectl apply -k examples/kustomize-nginx/overlays/production/
 ```
 

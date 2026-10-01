@@ -67,7 +67,7 @@ overlays/
     nebariapp-patch.yaml      # dev hostname, no auth
   production/
     kustomization.yaml
-    nebariapp-patch.yaml      # prod hostname, auth + groups
+    nebariapp-patch.yaml      # prod hostname, auth enabled
 ```
 
 Best for: packs deployed to multiple environments with known configuration differences.

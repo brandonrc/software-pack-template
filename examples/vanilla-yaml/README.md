@@ -103,15 +103,11 @@ auth:
   enabled: true
 ```
 
-To restrict access to specific groups, add a `groups` list:
-
-```yaml
-auth:
-  enabled: true
-  groups:
-    - admin
-    - data-science-team
-```
+`auth.groups` does not restrict access in operator v0.1.1: every user who can log
+in to the realm gets through
+([nebari-operator#153](https://github.com/nebari-dev/nebari-operator/issues/153)).
+To limit access to a group, verify the IdToken in your app and check its `groups`
+claim, as the auth-fastapi example does.
 
 ## Limitations
 

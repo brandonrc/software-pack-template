@@ -6,6 +6,8 @@ spec:
   hostname: my-pack.nebari.example.com
   auth:
     enabled: true
+    # Creates these groups in Keycloak. NOT enforced at the gateway in operator
+    # v0.1.1: any user in the realm can log in (nebari-operator#153).
     groups:
       - admin
       - data-science-team

@@ -44,6 +44,7 @@ spec:
       - openid
       - profile
       - email
+    # groups is NOT enforced by the gateway in v0.1.1 - see spec.auth below
     groups:
       - admin
   gateway: public
@@ -115,7 +116,7 @@ Used in both `spec.routing.routes[]` and `spec.routing.publicRoutes[]`.
 | `redirectURI` | string | No | `"/oauth2/callback"` | OAuth2 callback path. The full URL is `https://<hostname><redirectURI>`. |
 | `clientSecretRef` | string | No | - | Name (string) of a Secret in the same namespace containing keys `client-id` and `client-secret`. **Note:** the spec field is a plain string (the Secret name), not the `{name, namespace}` object reference used by `status.clientSecretRef`. If omitted and `provisionClient` is true, the operator creates a Secret named `<nebariapp-name>-oidc-client` with keys: `client-id`, `client-secret`, and `issuer-url`. |
 | `scopes` | []string | No | `["openid", "profile", "email"]` | OIDC scopes to request during authentication. |
-| `groups` | []string | No | - | Groups that have access. When specified, only users in these groups are authorized. Case-sensitive. |
+| `groups` | []string | No | - | **Not enforced in v0.1.1.** The operator creates these groups in Keycloak and publishes them as `status.serviceDiscovery.requiredGroups` for the landing page, but the SecurityPolicy it generates contains no authorization rule, so any user who can log in to the realm reaches the app ([nebari-operator#153](https://github.com/nebari-dev/nebari-operator/issues/153)). To restrict access by group today, verify the token in your app and check its `groups` claim (see [Authentication Flow](auth-flow.md#reading-user-identity-in-your-app)). |
 | `issuerURL` | string | No | - | OIDC issuer URL. Required when `provider=generic-oidc`, ignored for `keycloak`. Example: `https://accounts.google.com`. |
 | `spaClient` | [SPAClientConfig](#specauthspaclient) | No | - | Provisions a public Keycloak client for browser-based PKCE flows (e.g., React apps using `keycloak-js`). Distinct from the confidential client used by gateway-enforced auth. |
 | `deviceFlowClient` | [DeviceFlowClientConfig](#specauthdeviceflowclient) | No | - | Provisions a public Keycloak client for the OAuth2 Device Authorization Grant (RFC 8628), for CLI/native apps. |
@@ -305,9 +306,9 @@ spec:
   hostname: my-pack.nebari.example.com
   auth:
     enabled: true
-    groups:
-      - admin
 ```
+
+A strategic-merge patch only changes the fields it lists, so `routing` from the base is kept.
 
 ### Helm
 
