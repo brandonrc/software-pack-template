@@ -66,7 +66,7 @@ spec:
 | `routing` | [RoutingConfig](#specrouting) | No | - | Routing behavior including path rules, TLS, and HTTPRoute annotations. **Omitting `routing` disables operator-managed routing entirely** - the operator skips HTTPRoute creation and cleans up any existing HTTPRoute. TLS is also considered disabled in that case. The NebariApp still reports `Ready=True` (with `RoutingReady=False/RoutingNotConfigured`), so a pack without `routing` deploys cleanly and is unreachable through the gateway. Include at least `routes: [{pathPrefix: /}]`. |
 | `auth` | [AuthConfig](#specauth) | No | - | Authentication/authorization configuration. |
 | `gateway` | string | No | `"public"` | Which shared Gateway to use. Valid values: `public`, `internal`. |
-| `serviceAccountName` | string | No | NebariApp name | Name of the ServiceAccount used by the app's pods. The operator scopes RBAC on the OIDC client Secret to this ServiceAccount, so only the app's pods can read its credentials. |
+| `serviceAccountName` | string | No | NebariApp name | Name of the ServiceAccount used by the app's pods. When the operator provisions an OIDC client, it creates a Role and RoleBinding that let this ServiceAccount `get` the OIDC client Secret through the Kubernetes API. This grants access; it does not restrict anyone else. See [who can read the OIDC Secret](#who-can-read-the-oidc-secret). |
 | `landingPage` | [LandingPageConfig](#speclandingpage) | No | - | Controls how this service appears on the Nebari landing page. |
 
 ## spec.service
@@ -262,6 +262,21 @@ spec:
 ArgoCD only applies `managedNamespaceMetadata` to a namespace that the same Application
 creates. If the namespace already exists, label it yourself.
 
+## Who can read the OIDC Secret
+
+When `provisionClient` is true, the operator writes `<name>-oidc-client` and creates a Role
+(`<name>-oidc-secret-reader`) that lets `spec.serviceAccountName` `get` that Secret through the
+Kubernetes API. That Role adds access for one ServiceAccount. It does not remove access from
+anyone else. Kubernetes RBAC is additive, so these can also read the Secret:
+
+- anyone who already has `get` on Secrets in the namespace, such as namespace admins
+- any pod in the namespace, under any ServiceAccount, that mounts the Secret as an env var or
+  volume (the kubelet fetches it, not the pod's ServiceAccount), and therefore anyone who can
+  create pods there
+- the operator, which has cluster-wide Secret access, and Envoy Gateway, which reads the
+  client secret to run the OIDC filter
+
+Treat the namespace as the security boundary for these credentials.
 
 ## Deployment Patterns
 

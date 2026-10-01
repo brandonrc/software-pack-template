@@ -229,14 +229,16 @@ data:
   device-client-id: <base64-encoded> # Present when deviceFlowClient is enabled.
 ```
 
-The operator also creates RBAC resources granting your app's ServiceAccount read
-access to the secret:
+The operator also creates a Role and RoleBinding that let `spec.serviceAccountName` `get`
+this Secret through the Kubernetes API:
 
 - **Role:** `<nebariapp-name>-oidc-secret-reader`
 - **RoleBinding:** `<nebariapp-name>-oidc-secret-reader`
 
-This means your app's pods can reference the secret in `env.valueFrom.secretKeyRef`
-without additional RBAC configuration.
+You only need this if your app reads the Secret through the API. Referencing it with
+`env.valueFrom.secretKeyRef` or a volume works without any Role, because the kubelet
+fetches it. The Role does not stop anyone else from reading the Secret either; see
+"Who can read the OIDC Secret" in the NebariApp CRD reference.
 
 ### 3. Envoy Gateway SecurityPolicy (when `enforceAtGateway: true`)
 
