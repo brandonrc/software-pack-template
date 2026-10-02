@@ -144,7 +144,8 @@ jobs:
         run: |
           kubectl delete nebariapp my-pack --ignore-not-found --wait --timeout=60s
           kubectl delete -f examples/vanilla-yaml/deployment.yaml \
-                         -f examples/vanilla-yaml/service.yaml --ignore-not-found --wait
+                         -f examples/vanilla-yaml/service.yaml --ignore-not-found --wait \
+                         --cascade=foreground --timeout=60s
 
       # ============================================================
       # Test: kustomize-nginx (production overlay - auth enabled)
@@ -159,7 +160,7 @@ jobs:
 
       - name: "Cleanup kustomize-nginx"
         if: always()
-        run: kubectl delete -k examples/kustomize-nginx/overlays/production/ --ignore-not-found --wait --timeout=60s
+        run: kubectl delete -k examples/kustomize-nginx/overlays/production/ --ignore-not-found --wait --cascade=foreground --timeout=60s
 
       # ============================================================
       # Test: basic-nginx (Helm, no auth)
