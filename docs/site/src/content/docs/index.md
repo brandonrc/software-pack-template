@@ -13,7 +13,7 @@ A software pack is a Kubernetes application bundled with a `NebariApp` custom re
 
 ## Reference pages
 
-- **[NebariApp CRD reference](/nebariapp-crd-reference/)** - complete field-by-field reference for the `NebariApp` custom resource
+- **[NebariApp CRD reference](/nebariapp-crd-reference/)** - where the generated `NebariApp` field reference lives, and how to declare one with YAML, Kustomize, or Helm
 - **[Authentication flow](/auth-flow/)** - how OIDC works end-to-end; verifying the IdToken in your app
 - **[Release readiness](/release-readiness/)** - maturity levels and the promotion checklist for first-party packs
 

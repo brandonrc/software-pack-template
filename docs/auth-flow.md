@@ -398,7 +398,7 @@ for the complete configuration.
 
 ## NebariApp CRD vs Envoy Gateway SecurityPolicy
 
-The fields documented in [nebariapp-crd-reference.md](nebariapp-crd-reference.md) are the
+The fields documented in the [NebariApp API reference](https://github.com/nebari-dev/nebari-operator/blob/v0.1.1/docs/api-reference.md) are the
 fields the **operator** understands - they go on `spec.auth` of the NebariApp resource.
 At runtime, the operator generates an Envoy Gateway `SecurityPolicy` from the NebariApp,
 and that SecurityPolicy has its own (much larger) set of OIDC tuning knobs.
@@ -406,8 +406,8 @@ and that SecurityPolicy has its own (much larger) set of OIDC tuning knobs.
 This section is specifically about the **Envoy Gateway SecurityPolicy OIDC
 filter** fields. Other Keycloak-side or client-provisioning features (`spaClient`,
 `deviceFlowClient`, `keycloakConfig`, `tokenExchange`) are first-class NebariApp
-fields and are documented in
-[nebariapp-crd-reference.md](nebariapp-crd-reference.md).
+fields and are documented in the
+[NebariApp API reference](https://github.com/nebari-dev/nebari-operator/blob/v0.1.1/docs/api-reference.md).
 
 For the OIDC filter fields specifically, mentally place each one in one of these
 buckets:

@@ -32,7 +32,7 @@ From that declaration, the Nebari Operator creates:
 - A **Certificate** for HTTPS connections (via cert-manager)
 - A **Keycloak client** for user authentication (via an Envoy Gateway SecurityPolicy)
 
-See the [NebariApp CRD reference](/nebariapp-crd-reference/) for the full field list, and [Authentication flow](/auth-flow/) for how the OIDC login sequence works end-to-end.
+See the [generated field reference](https://github.com/nebari-dev/nebari-operator/blob/v0.1.1/docs/api-reference.md) for every field, and [Authentication flow](/auth-flow/) for how the OIDC login sequence works end-to-end.
 
 ## Pack lifecycle
 

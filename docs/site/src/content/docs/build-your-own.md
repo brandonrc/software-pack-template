@@ -114,6 +114,6 @@ For a private OCI chart registry, use `type: helm`, `enableOCI: "true"`, and the
 
 ## Going deeper
 
-- [NebariApp CRD reference](/nebariapp-crd-reference/) - every field explained
+- [NebariApp CRD reference](/nebariapp-crd-reference/) - where every field is documented, and how to declare a NebariApp with YAML, Kustomize, or Helm
 - [Authentication flow](/auth-flow/) - how OIDC works end-to-end, including verifying the IdToken in your app
 - [Release readiness](/release-readiness/) - maturity levels and the promotion checklist for official packs
