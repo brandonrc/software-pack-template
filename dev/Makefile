@@ -151,6 +151,7 @@ up-kustomize: cluster
 # up-basic - deploy basic nginx Helm example with NebariApp
 # --------------------------------------------------------------------------
 up-basic: cluster
+	helm dependency build $(CHART_BASIC)
 	helm upgrade --install my-pack $(CHART_BASIC) \
 		--set nebariapp.enabled=true \
 		--set nebariapp.hostname=$(HOSTNAME) \
@@ -165,6 +166,7 @@ up-basic: cluster
 # up-fastapi - deploy auth-aware FastAPI Helm example with NebariApp
 # --------------------------------------------------------------------------
 up-fastapi: cluster
+	helm dependency build $(CHART_FASTAPI)
 	helm upgrade --install my-pack $(CHART_FASTAPI) \
 		--set nebariapp.enabled=true \
 		--set nebariapp.hostname=$(HOSTNAME) \
@@ -181,7 +183,7 @@ up-fastapi: cluster
 # up-podinfo - deploy podinfo wrapper Helm example with NebariApp
 # --------------------------------------------------------------------------
 up-podinfo: cluster
-	helm dependency update $(CHART_PODINFO)
+	helm dependency build $(CHART_PODINFO)
 	helm upgrade --install my-pack $(CHART_PODINFO) \
 		--set nebariapp.enabled=true \
 		--set nebariapp.hostname=$(HOSTNAME) \

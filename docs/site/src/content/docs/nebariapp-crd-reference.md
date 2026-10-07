@@ -291,45 +291,37 @@ spec:
 
 ### Helm
 
-In Helm charts, you can make the NebariApp conditional so the chart works both
-standalone and on Nebari:
+Charts render the NebariApp through the shared `nebari-app.nebariApp` template
+provided by the `nebari-app` chart, instead of hand-writing the manifest.
+
+Add the dependency in `Chart.yaml`, then run `helm dependency build` to fetch it:
 
 ```yaml
-{{- if .Values.nebariapp.enabled }}
-apiVersion: reconcilers.nebari.dev/v1
-kind: NebariApp
-metadata:
-  name: {{ include "my-pack.fullname" . }}
-  namespace: {{ .Release.Namespace }}
-  labels:
-    {{- include "my-pack.labels" . | nindent 4 }}
-spec:
-  hostname: {{ required "nebariapp.hostname is required" .Values.nebariapp.hostname }}
-  service:
-    name: {{ .Values.nebariapp.service.name | default (include "my-pack.fullname" .) }}
-    port: {{ .Values.nebariapp.service.port | default 80 }}
-  {{- with .Values.nebariapp.auth }}
-  auth:
-    enabled: {{ .enabled | default false }}
-    provider: {{ .provider | default "keycloak" }}
-    provisionClient: {{ .provisionClient | default true }}
-    {{- with .scopes }}
-    scopes:
-      {{- toYaml . | nindent 6 }}
-    {{- end }}
-  {{- end }}
-{{- end }}
+dependencies:
+  - name: nebari-app
+    repository: oci://quay.io/nebari/charts
+    version: ">=0.1.1"
 ```
 
-The corresponding `values.yaml` section:
+Set any NebariApp `spec` field under `nebariapp:` in `values.yaml`. Everything
+under `nebariapp:` (except `enabled`) is passed through to the NebariApp spec,
+so all fields documented above can be set here. Each `{{ ... }}` value is rendered
+with the chart context and must produce valid JSON, so a template that renders a string
+ends with `| toJson`. Numbers such as the port below don't need it:
 
 ```yaml
 nebariapp:
   enabled: false
-  # hostname: my-pack.nebari.example.com  # Required when enabled
+  hostname: '{{ fail "nebariapp.hostname is required when nebariapp.enabled is true" }}'
   service:
-    name: ""   # Defaults to release fullname
-    port: 80
+    name: '{{ include "my-pack.fullname" . | toJson }}'
+    port: '{{ .Values.service.port }}'
+  routing:
+    routes:
+      - pathPrefix: /
+        pathType: PathPrefix
+    tls:
+      enabled: true
   auth:
     enabled: false
     provider: keycloak
@@ -340,3 +332,24 @@ nebariapp:
       - email
   gateway: public
 ```
+
+Render the NebariApp in `templates/nebariapp.yaml`. The `if` makes it optional,
+so the chart works both standalone and on Nebari:
+
+```yaml
+{{- if .Values.nebariapp.enabled }}
+{{- include "nebari-app.nebariApp" (dict
+    "metadata" (dict
+      "name"      (include "my-pack.fullname" .)
+      "namespace" .Release.Namespace
+      "labels"    (include "my-pack.labels" . | fromYaml)
+    )
+    "spec"   (omit .Values.nebariapp "enabled")
+    "tplCtx" .
+) -}}
+{{- end }}
+```
+
+`"tplCtx" .` passes the chart context into the template, so the `{{ ... }}`
+values in `values.yaml` are rendered with access to `.Values`, `.Release`, and
+the chart's named templates.
