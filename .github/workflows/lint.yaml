@@ -17,8 +17,12 @@ jobs:
 
       - name: Install kubeconform
         run: |
-          curl -sSL https://github.com/yannh/kubeconform/releases/latest/download/kubeconform-linux-amd64.tar.gz | \
-            sudo tar -xz -C /usr/local/bin kubeconform
+          KUBECONFORM_VERSION=v0.8.0
+          KUBECONFORM_SHA256=9bc2bffbf71f261128533edaf912153948b7ff238f9a531ae6d34466ec287883
+          curl -sSLo /tmp/kubeconform.tar.gz \
+            "https://github.com/yannh/kubeconform/releases/download/${KUBECONFORM_VERSION}/kubeconform-linux-amd64.tar.gz"
+          echo "${KUBECONFORM_SHA256}  /tmp/kubeconform.tar.gz" | sha256sum -c -
+          sudo tar -xzf /tmp/kubeconform.tar.gz -C /usr/local/bin kubeconform
 
       # Vanilla YAML example
       - name: Validate vanilla-yaml manifests
@@ -97,6 +101,28 @@ jobs:
           if grep -rn --include='*.md' -E '^\s*project:\s*default\b' README.md docs examples; then
             echo "ArgoCD Application examples must use 'project: nebari-apps'"; exit 1
           fi
+
+      - name: Operator version references match OPERATOR_REF
+        run: |
+          # dev/Makefile's OPERATOR_REF is the one pinned operator version. Links to
+          # operator docs and releases must use it, and prose that names an operator
+          # version must name one the integration matrix tests.
+          set -euo pipefail
+          ref=$(sed -n 's/^OPERATOR_REF ?= //p' dev/Makefile)
+          tested=$(yq '.jobs.*.strategy.matrix.operator-ref[]' .github/workflows/test-integration.yaml | sort -u)
+          echo "OPERATOR_REF=$ref; CI matrix: $(echo $tested)"
+          echo "$tested" | grep -qx "$ref" || { echo "OPERATOR_REF $ref is not in the integration matrix"; exit 1; }
+          fail=0
+          # Operator doc and release links must point at the pinned version.
+          while IFS= read -r hit; do
+            echo "::error::$hit links a different operator version than OPERATOR_REF ($ref)"; fail=1
+          done < <(git grep -nE 'nebari-operator/(blob|tree|releases/download)/v[0-9]' -- '*.md' '*.yaml' '*.yml' | grep -v "nebari-operator/[a-z/]*/$ref/" || true)
+          # Prose naming an operator version must name one CI actually tests.
+          while IFS= read -r hit; do
+            v=$(echo "$hit" | grep -oE 'operator `?v[0-9]+\.[0-9]+\.[0-9]+[-a-z0-9.]*' | head -1 | grep -oE 'v[0-9].*' | sed 's/[.]$//')
+            echo "$tested" | grep -qx "$v" || { echo "::error::$hit names operator $v, which the integration matrix does not test"; fail=1; }
+          done < <(git grep -nE 'operator `?v[0-9]+\.[0-9]+\.[0-9]+' -- '*.md' || true)
+          exit $fail
 
   app-tests:
     runs-on: ubuntu-latest

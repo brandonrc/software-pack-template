@@ -10,7 +10,7 @@ Kustomize, or Helm.
 **Operator version this page tracks:** `v0.1.1`
 
 This page used to hold a hand-maintained copy of the NebariApp field reference. It went stale:
-it tracked operator `v0.1.0-alpha.19` while the operator moved on, and nothing detected the
+it tracked an operator release from several versions back, and nothing detected the
 drift. Two copies of it lived in this repository, and the operator generates a third from the
 Go types. The field reference now has one home, next to the code that enforces it.
 
@@ -37,14 +37,18 @@ behind the types the way this page did.
 - **`auth.clientSecretRef` is ignored in v0.1.1.** The operator always reads and writes the
   Secret named `<nebariapp-name>-oidc-client`, with keys `client-id`, `client-secret`, and
   `issuer-url`. If you manage credentials yourself (`provisionClient: false`), create the
-  Secret under that name. `status.clientSecretRef` is not written either
+  Secret under that name, and name the client in your identity provider
+  `<namespace>-<nebariapp-name>`: the gateway's SecurityPolicy always uses that client ID,
+  not the Secret's `client-id`. `status.clientSecretRef` is not written either
   ([nebari-operator#193](https://github.com/nebari-dev/nebari-operator/issues/193)).
 - **`Ready=True` does not mean the app is reachable.** `Ready` reflects the core checks
   (namespace label, Service, validation) and hard reconcile failures. It does not wait for
   `RoutingReady`, `TLSReady`, or `AuthReady`: a NebariApp with `TLSReady=False` still reports
-  `Ready=True`. Check the conditions you depend on.
+  `Ready=True`. Check the conditions you depend on
+  ([nebari-operator#195](https://github.com/nebari-dev/nebari-operator/issues/195)).
 - **`landingPage.displayName` is not validated.** Set it whenever `landingPage.enabled` is
-  `true`. The operator does not reject a missing value.
+  `true`. The operator does not reject a missing value
+  ([nebari-operator#196](https://github.com/nebari-dev/nebari-operator/issues/196)).
 - **NIC v0.14.0 deploys operator `v0.1.0-alpha.20`, not `v0.1.1`.** `landingPage.iconLight`
   and `landingPage.iconDark` were added after alpha.20 and are not available there.
 
@@ -94,8 +98,8 @@ creates. If the namespace already exists, label it yourself.
 ## Who can read the OIDC Secret
 
 When `provisionClient` is true, the operator writes `<name>-oidc-client` and creates a Role
-(`<name>-oidc-secret-reader`) that lets `spec.serviceAccountName` `get` that Secret through the
-Kubernetes API. That Role adds access for one ServiceAccount. It does not remove access from
+(`<name>-oidc-secret-reader`) that lets `spec.serviceAccountName` (default: the NebariApp name) `get` that Secret
+through the Kubernetes API. That Role adds access for one ServiceAccount. It does not remove access from
 anyone else. Kubernetes RBAC is additive, so these can also read the Secret:
 
 - anyone who already has `get` on Secrets in the namespace, such as namespace admins

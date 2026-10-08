@@ -5,10 +5,16 @@ Run from examples/auth-fastapi:
     pytest tests
 """
 
+import base64
+import hashlib
+import hmac
+import json
+import logging
 import time
 
 import jwt
 import pytest
+from cryptography.hazmat.primitives import serialization
 from cryptography.hazmat.primitives.asymmetric import rsa
 from fastapi.testclient import TestClient
 
@@ -53,6 +59,23 @@ def make_token(key=TRUSTED, kid="trusted", drop=(), **overrides):
     return jwt.encode(claims, key, algorithm="RS256", headers={"kid": kid})
 
 
+def _b64(data: bytes) -> str:
+    return base64.urlsafe_b64encode(data).rstrip(b"=").decode()
+
+
+def forge_token(alg, kid="trusted"):
+    """Build a token PyJWT refuses to encode: alg=none, or HS256 keyed with the
+    trusted RSA public key (the classic algorithm-confusion attack)."""
+    claims = {"iss": ISSUER, "aud": CLIENT_ID, "exp": int(time.time()) + 300, "preferred_username": "alice"}
+    signing_input = f"{_b64(json.dumps({'alg': alg, 'kid': kid}).encode())}.{_b64(json.dumps(claims).encode())}"
+    if alg == "none":
+        return signing_input + "."
+    public_pem = TRUSTED.public_key().public_bytes(
+        serialization.Encoding.PEM, serialization.PublicFormat.SubjectPublicKeyInfo
+    )
+    return f"{signing_input}.{_b64(hmac.new(public_pem, signing_input.encode(), hashlib.sha256).digest())}"
+
+
 @pytest.fixture
 def client(monkeypatch):
     monkeypatch.setattr(main, "verifier", main.TokenVerifier(ISSUER, CLIENT_ID, FakeJWKClient()))
@@ -71,6 +94,8 @@ def client(monkeypatch):
         ("expired", {"IdToken-a1b2c3d4": make_token(exp=int(time.time()) - 60)}, False),
         ("no expiry", {"IdToken-a1b2c3d4": make_token(drop=["exp"])}, False),
         ("unsigned payload", {"IdToken-a1b2c3d4": "e30.eyJwcmVmZXJyZWRfdXNlcm5hbWUiOiJldmUifQ."}, False),
+        ("alg none with a trusted kid", {"IdToken-a1b2c3d4": forge_token("none")}, False),
+        ("HS256 keyed with the public key", {"IdToken-a1b2c3d4": forge_token("HS256")}, False),
         (
             "extra IdToken cookie",
             {"IdToken-a1b2c3d4": make_token(), "IdToken-00000000": make_token(key=UNTRUSTED)},
@@ -97,3 +122,18 @@ def test_verification_not_configured_fails_closed(monkeypatch):
 
 def test_health():
     assert TestClient(main.app).get("/health").json() == {"status": "ok"}
+
+
+class UnreachableJWKClient:
+    def get_signing_key_from_jwt(self, token):
+        raise jwt.PyJWKClientConnectionError("connection refused")
+
+
+def test_jwks_outage_fails_closed_and_warns(monkeypatch, caplog):
+    monkeypatch.setattr(main, "verifier", main.TokenVerifier(ISSUER, CLIENT_ID, UnreachableJWKClient()))
+    client = TestClient(main.app)
+    client.cookies.set("IdToken-a1b2c3d4", make_token())
+    with caplog.at_level(logging.INFO, logger=main.log.name):
+        body = client.get("/").text
+    assert "alice" not in body
+    assert any(r.levelno == logging.WARNING and "signing keys" in r.getMessage() for r in caplog.records)

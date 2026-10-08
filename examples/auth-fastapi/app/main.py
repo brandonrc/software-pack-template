@@ -54,6 +54,11 @@ class TokenVerifier:
                 # but accepts a token with no exp unless told to require it.
                 options={"require": ["exp", "iss", "aud"]},
             )
+        except jwt.PyJWKClientConnectionError as exc:
+            # Keycloak's JWKS endpoint is unreachable. This is an outage, not a
+            # bad token, so make it visible; the request still fails closed.
+            log.warning("could not fetch signing keys to verify IdToken: %s", exc)
+            return None
         except jwt.PyJWTError as exc:
             log.info("rejected IdToken: %s", exc)
             return None
@@ -72,7 +77,7 @@ def verifier_from_env() -> TokenVerifier | None:
     if not issuer or not client_id:
         return None
     jwks_url = os.environ.get("OIDC_JWKS_URL") or f"{issuer.rstrip('/')}/protocol/openid-connect/certs"
-    return TokenVerifier(issuer, client_id, jwt.PyJWKClient(jwks_url, cache_keys=True, timeout=5))
+    return TokenVerifier(issuer, client_id, jwt.PyJWKClient(jwks_url, timeout=5))
 
 
 verifier = verifier_from_env()

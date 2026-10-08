@@ -213,7 +213,12 @@ jobs:
           out=$(probe || true)
           echo "$out" | grep -q 'curl_exit=28' || { echo "NetworkPolicy did not block direct access"; echo "$out"; exit 1; }
           kubectl delete networkpolicy test-fastapi-my-pack --wait
-          out=$(probe || true)
+          # The CNI can take a few seconds to drop the rule after the delete.
+          for attempt in 1 2 3 4 5 6; do
+            out=$(probe || true)
+            echo "$out" | grep -q 'curl_exit=28' || break
+            echo "probe $attempt still blocked, retrying"; sleep 5
+          done
           echo "$out" | grep -q 'could not be verified' || { echo "forged token was not rejected"; echo "$out"; exit 1; }
           if echo "$out" | grep -q mallory; then echo "forged identity was displayed"; exit 1; fi
           echo "forged token rejected"

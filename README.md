@@ -436,6 +436,8 @@ claims = jwt.decode(
     algorithms=["RS256"],
     audience=CLIENT_ID,   # client-id from <name>-oidc-client
     issuer=ISSUER,        # issuer-url from <name>-oidc-client
+    # PyJWT accepts a token with no exp unless told to require it.
+    options={"require": ["exp", "iss", "aud"]},
 )
 ```
 
@@ -960,7 +962,8 @@ kubectl get securitypolicy my-pack-security -n my-pack \
 `OIDC: error fetching endpoints from issuer` means the operator is pointing Envoy
 Gateway at the wrong in-cluster Keycloak URL. Set `KEYCLOAK_ISSUER_SERVICE_PORT` and
 `KEYCLOAK_ISSUER_CONTEXT_PATH` on the operator Deployment to match your Keycloak
-Service (NIC sets these; `dev/configure-operator.sh` shows the kind equivalent).
+Service. NIC sets the context path and runs Keycloak on the operator's default port,
+8080; `dev/configure-operator.sh` shows the kind equivalent.
 
 ### TLS certificate not provisioning
 

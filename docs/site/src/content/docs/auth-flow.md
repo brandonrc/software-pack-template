@@ -134,6 +134,9 @@ in it.** Envoy Gateway does not do this for you:
   in `routing.publicRoutes` are served by an HTTPRoute with no SecurityPolicy attached.
   A request on any of those paths can carry any `IdToken-*` cookie it likes.
 
+Whether the platform should state or enforce this itself is tracked in
+[nebari-operator#194](https://github.com/nebari-dev/nebari-operator/issues/194).
+
 Verification needs three values, all available to your pod:
 
 | Value | Where it comes from |
@@ -142,12 +145,19 @@ Verification needs three values, all available to your pod:
 | Issuer (the token's `iss`) | `issuer-url` key of the same Secret. It is empty unless the operator runs with `KEYCLOAK_EXTERNAL_URL`; in that case use the issuer your Keycloak puts in tokens. |
 | JWKS URL | Keycloak serves it at `<issuer>/protocol/openid-connect/certs`. Use the in-cluster Keycloak URL if your pods cannot reach the public one. |
 
-With [PyJWT](https://pyjwt.readthedocs.io/) (`PyJWT[crypto]>=2.10`):
+With [PyJWT](https://pyjwt.readthedocs.io/) (`PyJWT[crypto]>=2.10.1`; 2.10.0 has a broken issuer check,
+[CVE-2024-53861](https://github.com/advisories/GHSA-75c5-xw7c-p5pm)):
 
 ```python
+import logging
+
 import jwt
 
-jwks = jwt.PyJWKClient(JWKS_URL, cache_keys=True)
+log = logging.getLogger(__name__)
+
+# The JWK set is cached for 5 minutes. Avoid cache_keys=True: its per-key cache never
+# expires, so a key Keycloak has removed would stay trusted until the process restarts.
+jwks = jwt.PyJWKClient(JWKS_URL, timeout=5)
 
 
 def verified_claims(request) -> dict | None:
@@ -164,6 +174,9 @@ def verified_claims(request) -> dict | None:
             issuer=ISSUER,
             options={"require": ["exp", "iss", "aud"]},
         )
+    except jwt.PyJWKClientConnectionError:
+        log.warning("JWKS unreachable; treating request as unauthenticated")
+        return None
     except jwt.PyJWTError:
         return None
 ```
@@ -229,8 +242,8 @@ data:
   device-client-id: <base64-encoded> # Present when deviceFlowClient is enabled.
 ```
 
-The operator also creates a Role and RoleBinding that let `spec.serviceAccountName` `get`
-this Secret through the Kubernetes API:
+The operator also creates a Role and RoleBinding that let `spec.serviceAccountName` (default: the
+NebariApp name) `get` this Secret through the Kubernetes API:
 
 - **Role:** `<nebariapp-name>-oidc-secret-reader`
 - **RoleBinding:** `<nebariapp-name>-oidc-secret-reader`
@@ -377,7 +390,7 @@ extraEnvRaw:
       secretKeyRef:
         name: <nebariapp-name>-oidc-client
         key: issuer-url
-        optional: true  # May not be present in all configurations
+        optional: true  # Always written, but empty unless the operator sets KEYCLOAK_EXTERNAL_URL
 ```
 
 The OIDC discovery URL can be constructed as:
@@ -425,7 +438,8 @@ for the full set of OIDC fields.
 
 - **Local development:** The `dev/` Makefile builds a kind cluster with Keycloak, Envoy
   Gateway, cert-manager and the operator, so you can test the full login flow locally:
-  `cd dev && make up-fastapi`, then log in with the Keycloak credentials it prints. The
+  `cd dev && make up-fastapi`, then `make update-hosts` so the browser can resolve
+  `keycloak.nebari.local`, then log in with the Keycloak credentials it prints. The
   FastAPI example shows "Not Authenticated" when no valid IdToken cookie is present.
 
 - **Token expiration:** Envoy Gateway handles token refresh automatically via refresh

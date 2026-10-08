@@ -3,6 +3,11 @@
   cannot bypass the OIDC filter by calling the Service from inside the cluster.
   This does not cover routing.publicRoutes, which go through the gateway without
   a SecurityPolicy; the app's own token verification handles those.
+
+  The proxy labels and gatewayNamespace below describe how the platform deploys
+  Envoy Gateway, not anything this pack controls. If you copy this file, expect to
+  update them when the platform changes; nebari-operator#197 tracks giving the
+  selector one owner in the nebari-app chart.
 */}}
 {{- if .Values.networkPolicy.enabled }}
 apiVersion: networking.k8s.io/v1
