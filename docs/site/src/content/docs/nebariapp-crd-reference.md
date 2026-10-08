@@ -34,6 +34,17 @@ behind the types the way this page did.
   realm reaches the app ([nebari-operator#153](https://github.com/nebari-dev/nebari-operator/issues/153)). To restrict access by group
   today, verify the token in your app and check its `groups` claim (see
   [Authentication Flow](/auth-flow/#reading-user-identity-in-your-app)).
+- **`auth.clientSecretRef` is ignored in v0.1.1.** The operator always reads and writes the
+  Secret named `<nebariapp-name>-oidc-client`, with keys `client-id`, `client-secret`, and
+  `issuer-url`. If you manage credentials yourself (`provisionClient: false`), create the
+  Secret under that name. `status.clientSecretRef` is not written either
+  ([nebari-operator#193](https://github.com/nebari-dev/nebari-operator/issues/193)).
+- **`Ready=True` does not mean the app is reachable.** `Ready` reflects the core checks
+  (namespace label, Service, validation) and hard reconcile failures. It does not wait for
+  `RoutingReady`, `TLSReady`, or `AuthReady`: a NebariApp with `TLSReady=False` still reports
+  `Ready=True`. Check the conditions you depend on.
+- **`landingPage.displayName` is not validated.** Set it whenever `landingPage.enabled` is
+  `true`. The operator does not reject a missing value.
 - **NIC v0.14.0 deploys operator `v0.1.0-alpha.20`, not `v0.1.1`.** `landingPage.iconLight`
   and `landingPage.iconDark` were added after alpha.20 and are not available there.
 
