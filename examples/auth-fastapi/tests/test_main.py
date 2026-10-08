@@ -94,6 +94,8 @@ def client(monkeypatch):
         ("expired", {"IdToken-a1b2c3d4": make_token(exp=int(time.time()) - 60)}, False),
         ("no expiry", {"IdToken-a1b2c3d4": make_token(drop=["exp"])}, False),
         ("unsigned payload", {"IdToken-a1b2c3d4": "e30.eyJwcmVmZXJyZWRfdXNlcm5hbWUiOiJldmUifQ."}, False),
+        # PyJWT itself refuses both of these with a key object, whatever algorithms
+        # are allowed; test_verify_pins_rs256 is what guards the pin.
         ("alg none with a trusted kid", {"IdToken-a1b2c3d4": forge_token("none")}, False),
         ("HS256 keyed with the public key", {"IdToken-a1b2c3d4": forge_token("HS256")}, False),
         (
@@ -109,6 +111,20 @@ def test_index_only_trusts_verified_tokens(client, name, cookies, authenticated)
     body = client.get("/").text
     assert ("alice" in body) is authenticated, name
     assert ("Not Authenticated" in body) is not authenticated, name
+
+
+def test_verify_pins_rs256(monkeypatch):
+    seen = {}
+    real_decode = jwt.decode
+
+    def spy(*args, **kwargs):
+        seen.update(kwargs)
+        return real_decode(*args, **kwargs)
+
+    monkeypatch.setattr(main.jwt, "decode", spy)
+    claims = main.TokenVerifier(ISSUER, CLIENT_ID, FakeJWKClient()).verify(make_token())
+    assert claims["preferred_username"] == "alice"
+    assert seen["algorithms"] == ["RS256"]
 
 
 def test_verification_not_configured_fails_closed(monkeypatch):

@@ -219,6 +219,9 @@ jobs:
             echo "$out" | grep -q 'curl_exit=28' || break
             echo "probe $attempt still blocked, retrying"; sleep 5
           done
+          if echo "$out" | grep -q 'curl_exit=28'; then
+            echo "NetworkPolicy still blocks the Service after it was deleted"; echo "$out"; exit 1
+          fi
           echo "$out" | grep -q 'could not be verified' || { echo "forged token was not rejected"; echo "$out"; exit 1; }
           if echo "$out" | grep -q mallory; then echo "forged identity was displayed"; exit 1; fi
           echo "forged token rejected"

@@ -390,7 +390,8 @@ extraEnvRaw:
       secretKeyRef:
         name: <nebariapp-name>-oidc-client
         key: issuer-url
-        optional: true  # Always written, but empty unless the operator sets KEYCLOAK_EXTERNAL_URL
+        optional: true  # Written by the operator when it provisions the client (empty unless
+                        # KEYCLOAK_EXTERNAL_URL is set); with provisionClient: false, you write it
 ```
 
 The OIDC discovery URL can be constructed as:
