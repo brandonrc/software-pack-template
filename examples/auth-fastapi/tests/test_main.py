@@ -123,8 +123,8 @@ def test_verify_pins_rs256(monkeypatch):
 
     monkeypatch.setattr(main.jwt, "decode", spy)
     claims = main.TokenVerifier(ISSUER, CLIENT_ID, FakeJWKClient()).verify(make_token())
-    assert claims["preferred_username"] == "alice"
     assert seen["algorithms"] == ["RS256"]
+    assert claims["preferred_username"] == "alice"
 
 
 def test_verification_not_configured_fails_closed(monkeypatch):

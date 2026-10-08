@@ -32,12 +32,12 @@ while IFS= read -r hit; do
 done < <(git grep -noE "nebari-operator/(blob|tree|releases/download|releases/tag)/[A-Za-z0-9._-]+" "${files[@]}" || true)
 
 while IFS= read -r hit; do
-  v=$(grep -oE "$version" <<<"$hit")
+  v=$(grep -oiE "$version" <<<"$hit")
   [ "$v" = "$ref" ] || err "$hit: page pin is $v, not OPERATOR_REF ($ref)"
 done < <(git grep -noE "Operator version this page tracks:\*\* \`$version" "${files[@]}" || true)
 
 while IFS= read -r hit; do
-  v=$(grep -oE "$version" <<<"$hit")
+  v=$(grep -oiE "$version" <<<"$hit")
   grep -qxF "$v" <<<"$tested" || err "$hit: names operator $v, which the integration matrix does not test"
 done < <(git grep -noiE "(\bin|operator( version:)?) \`?$version" "${files[@]}" || true)
 
