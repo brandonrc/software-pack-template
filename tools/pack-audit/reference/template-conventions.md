@@ -28,8 +28,8 @@ spec:
     provider: keycloak
     provisionClient: true
     enforceAtGateway: true                 # false only for app-native OAuth (Harbor, Grafana)
-    scopes: [openid, profile, email]
-    groups: []                             # optional allow-list
+    scopes: [openid, profile, email, groups]   # include groups whenever auth.groups is set
+    groups: []                             # optional allow-list; needs the groups scope above
   gateway: public                          # or internal
   landingPage: {enabled: true, displayName: ...}
 ```
@@ -127,5 +127,8 @@ maintenance liability and a sign the pack has not been shaped yet.
 - `routing` omitted from the NebariApp.
 - `auth.enforceAtGateway: false` without docs on how the app uses the
   operator-provisioned OIDC client Secret.
+- `auth.groups` set without `groups` in `auth.scopes`: the operator attaches
+  the Keycloak groups scope only when requested, so the token has no groups
+  claim and the group gate rejects everyone (seen live on a NIC cluster).
 - Placeholders (`<registry>`, `REPLACE_`, `CHANGEME`) that `helm install`
   accepts silently.

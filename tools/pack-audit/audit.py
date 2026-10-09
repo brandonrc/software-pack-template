@@ -481,6 +481,10 @@ def validate_nebariapp(na: dict, services: dict) -> list[str]:
     unknown(auth, CRD["auth"], "spec.auth")
     if auth.get("forwardAccessToken") and auth.get("enforceAtGateway") is False:
         issues.append("auth.forwardAccessToken requires enforceAtGateway: true")
+    scopes = set(auth.get("scopes") or ["openid", "profile", "email"])
+    if auth.get("enabled") and auth.get("groups") and "groups" not in scopes:
+        issues.append("auth.groups is set but 'groups' is not in auth.scopes: the operator only attaches the Keycloak groups scope/mapper when it is requested, "
+                      "so the token carries no groups claim and a group-gated SecurityPolicy denies every login (verified on a NIC cluster 2026-10-09); add groups to auth.scopes")
     if spec.get("gateway") not in (None, "public", "internal"):
         issues.append(f"spec.gateway must be public|internal, got {spec.get('gateway')!r}")
     lp = spec.get("landingPage") or {}
@@ -788,7 +792,7 @@ def scan(args) -> dict:
             R.set("NA-01", "MANUAL", "NebariApp renders cleanly and the service reference resolves; needs cluster verification", det)
         routed = spec.get("routing") is not None
         depth = "full" if (auth_on and routed) else "partial"
-        hard = [i for i in issues if "unknown field" in i or "does not match" in i or "omitted" in i or "missing" in i or "must be" in i]
+        hard = [i for i in issues if "unknown field" in i or "does not match" in i or "omitted" in i or "missing" in i or "must be" in i or "not in auth.scopes" in i]
         if not issues:
             R.set("NA-07", "PASS", "NebariApp spec uses only CRD fields, routing is explicit, and service name/port resolve to a rendered Service")
         elif hard:
