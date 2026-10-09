@@ -27,3 +27,6 @@ Thumbs.db
 
 # Claude
 CLAUDE.md
+
+# pack-audit output
+tools/pack-audit/reports/

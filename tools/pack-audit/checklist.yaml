@@ -1,0 +1,569 @@
+# Software-pack readiness rubric.
+#
+# Derived item-for-item from the upstream release-readiness checklist in
+# nebari-dev/software-pack-template (docs/release-readiness-checklist.md, vendored
+# in reference/). Each item carries:
+#
+#   level     E | A | B | GA   The maturity level at which the item becomes a
+#                              promotion blocker (Experimental, Alpha, Beta, GA).
+#   check     auto      audit.py decides the status from the repository contents.
+#             judgment  audit.py gathers evidence; the auditor agent decides.
+#             manual    needs a cluster, a person, or an org system; never scored.
+#   applies   all | first-party | standalone | auth
+#             first-party items only apply to packs living in the nebari-dev org;
+#             for vendor packs they are reported N/A with the adapted expectation.
+#
+# Scoring (see audit.py):
+#   weight by level  E=4  A=3  B=2  GA=1
+#   PASS=1  PARTIAL=0.5  FAIL=0   MANUAL and NA are excluded from the denominator.
+#   The PS (pre-sales) and SO (sign-off) categories are never scored: every item is
+#   `manual`. They stay in the report so the promotion PR has the full list.
+#   Items with `enabled: false` are excluded from scoring and gates entirely and
+#   listed at the end of the report. Decision 2026-10-09: "runs in CI" is never
+#   the requirement by itself; what matters is that the check exists and passes.
+#   Lint, schema validation and packaging are verified by the auditor directly;
+#   the install/integration/upgrade tests count fully from CI and partially from
+#   a checked-in script.
+#   The achieved level is the highest level L such that every scorable item at
+#   level <= L is PASS or NA.
+
+levels:
+  E:  { name: Experimental, weight: 4 }
+  A:  { name: Alpha,        weight: 3 }
+  B:  { name: Beta,         weight: 2 }
+  GA: { name: GA,           weight: 1 }
+
+categories:
+  OI:  Ownership & Identity
+  IN:  Installation
+  NA:  NebariApp Integration
+  DOC: Documentation
+  EX:  Examples
+  TEL: Telemetry
+  SEC: Security
+  RE:  Release Engineering
+  PS:  Pre-sales Verification
+  SO:  Sign-off
+
+items:
+  # ---------------------------------------------------------------- Ownership
+  - id: OI-01
+    source: https://github.com/nebari-dev/software-pack-template/blob/main/docs/release-readiness-checklist.md#ownership--identity
+    example: https://github.com/nebari-dev/software-pack-template/blob/main/README.md#repository-structure
+    level: E
+    category: OI
+    check: auto
+    title: Repo follows the software-pack template layout
+    expect: >
+      A deployable unit (Helm chart, Kustomize overlay, or plain manifests) that
+      carries a NebariApp resource, plus README, LICENSE, CI workflows, and
+      pack-metadata.yaml at the repo root. A Helm chart lives at chart/ or at the
+      repo root.
+  - id: OI-02
+    source: https://github.com/nebari-dev/software-pack-template/blob/main/docs/release-readiness-checklist.md#ownership--identity
+    example: https://github.com/nebari-dev/harbor-pack/blob/main/CODEOWNERS
+    level: E
+    category: OI
+    check: auto
+    title: CODEOWNERS names at least one accountable engineer
+    expect: CODEOWNERS (root or .github/) with at least one non-comment owner line.
+  - id: OI-03
+    source: https://github.com/nebari-dev/software-pack-template/blob/main/docs/release-readiness-checklist.md#pack-metadata-file
+    example: https://github.com/nebari-dev/software-pack-dashboard/blob/main/schema/pack-metadata.example.yaml
+    level: E
+    category: OI
+    check: auto
+    title: pack-metadata.yaml exists, validates against the dashboard schema, and declares level + owner + scope
+    expect: >
+      pack-metadata.yaml at the repo root that validates against
+      reference/pack-metadata.schema.json and sets level, owner, nebariapp_integration
+      and scope.standalone-supported.
+  - id: OI-04
+    source: https://github.com/nebari-dev/software-pack-template/blob/main/docs/release-readiness-checklist.md#ownership--identity
+    example: https://github.com/nebari-dev/software-pack-dashboard/blob/main/tracked-packs.yaml
+    level: E
+    category: OI
+    check: manual
+    applies: first-party
+    title: Pack is listed in nebari-dev/software-pack-dashboard tracked-packs.yaml
+    expect: >
+      First-party packs only. Vendor packs instead need an entry in the platform
+      team's pack catalog / ArgoCD app-of-apps; record where.
+  - id: OI-05
+    source: https://github.com/nebari-dev/software-pack-template/blob/main/docs/release-readiness-checklist.md#ownership--identity
+    example: https://github.com/nebari-dev/harbor-pack/blob/main/README.md
+    level: E
+    category: OI
+    check: judgment
+    title: README explains what the pack does and who it is for
+    expect: A reader new to the product can tell what it deploys and which users it serves within the first screen.
+  - id: OI-06
+    source: https://github.com/nebari-dev/software-pack-template/blob/main/docs/release-readiness-checklist.md#ownership--identity
+    example: https://github.com/nebari-dev/langfuse-pack/blob/main/pack-metadata.yaml
+    level: B
+    category: OI
+    check: auto
+    title: product_owner is populated in pack-metadata.yaml
+    expect: product_owner is a non-null string.
+
+  # ------------------------------------------------------------- Installation
+  - id: IN-01
+    source: https://github.com/nebari-dev/software-pack-template/blob/main/docs/release-readiness-checklist.md#installation
+    example: https://github.com/nebari-dev/harbor-pack/blob/main/README.md#quick-start-on-nebari
+    level: A
+    category: IN
+    check: manual
+    title: Installs cleanly on a fresh current-release NIC dev cluster following only the README
+    expect: Verified on a cluster; the auditor records whether the README alone is sufficient.
+  - id: IN-02
+    source: https://github.com/nebari-dev/software-pack-template/blob/main/docs/release-readiness-checklist.md#installation
+    example: https://github.com/nebari-dev/harbor-pack/blob/main/README.md#prerequisites
+    level: A
+    category: IN
+    check: judgment
+    title: Prerequisites documented (NIC version, sizing, namespace labels, external dependencies)
+    expect: A Prerequisites section naming platform version, cluster sizing, the nebari.dev/managed namespace label, storage, GPU, and external services.
+  - id: IN-03
+    source: https://github.com/nebari-dev/software-pack-template/blob/main/docs/release-readiness-checklist.md#installation
+    example: https://github.com/nebari-dev/harbor-pack/blob/main/.github/workflows/lint.yaml
+    level: B
+    category: IN
+    check: auto
+    title: helm lint passes
+    expect: helm lint exits 0 (CI wiring is noted, not required).
+  - id: IN-04
+    source: https://github.com/nebari-dev/software-pack-template/blob/main/docs/release-readiness-checklist.md#installation
+    example: https://github.com/nebari-dev/software-pack-template/blob/main/.github/workflows/lint.yaml
+    level: B
+    category: IN
+    check: auto
+    title: helm template renders with NebariApp enabled and disabled
+    expect: Both renders succeed; the NebariApp appears only when enabled.
+  - id: IN-05
+    source: https://github.com/nebari-dev/software-pack-template/blob/main/docs/release-readiness-checklist.md#installation
+    example: https://github.com/nebari-dev/harbor-pack/blob/main/.github/workflows/lint.yaml
+    level: B
+    category: IN
+    check: auto
+    title: Rendered manifests pass Kubernetes schema validation
+    expect: >
+      The auditor runs kubeconform -strict (or the pure-Python kubernetes-validate)
+      over the rendered manifests; they must validate. A CI step that does the same
+      is noted, not required (decision 2026-10-09).
+  - id: IN-06
+    source: https://github.com/nebari-dev/software-pack-template/blob/main/docs/release-readiness-checklist.md#installation
+    example: https://github.com/nebari-dev/mlflow-pack/blob/main/.github/workflows/test-integration.yaml
+    level: GA
+    category: IN
+    check: auto
+    title: Integration test against the full NIC stack (CI or repeatable script)
+    expect: A CI job or a checked-in script that installs nebari-operator (or the Nebari sandbox action) and waits for the NebariApp Ready condition; script-only is PARTIAL.
+  - id: IN-07
+    source: https://github.com/nebari-dev/software-pack-template/blob/main/docs/release-readiness-checklist.md#installation
+    example: https://github.com/nebari-dev/harbor-pack/blob/main/.github/workflows/test.yaml
+    level: GA
+    category: IN
+    check: auto
+    applies: standalone
+    title: Standalone install test (nebariapp.enabled=false) in CI or a repeatable script
+    expect: A CI job that installs on kind without the operator and health-checks the service.
+
+  # ------------------------------------------------------ NebariApp integration
+  - id: NA-01
+    source: https://github.com/nebari-dev/software-pack-template/blob/main/docs/release-readiness-checklist.md#nebariapp-integration
+    example: https://github.com/nebari-dev/software-pack-template/blob/main/README.md#verifying-the-deployment
+    level: A
+    category: NA
+    check: manual
+    title: NebariApp reaches Ready with RoutingReady, TLSReady, AuthReady healthy
+    expect: >
+      Cluster verification. audit.py pre-checks that the NebariApp renders, uses
+      only CRD fields, and that spec.service.name/port resolve to a rendered Service.
+  - id: NA-02
+    source: https://github.com/nebari-dev/software-pack-template/blob/main/docs/release-readiness-checklist.md#nebariapp-integration
+    example: https://github.com/nebari-dev/harbor-pack/blob/main/chart/values.yaml
+    level: A
+    category: NA
+    check: judgment
+    title: All NebariApp fields the pack exposes are documented in its values reference
+    expect: Every nebariapp.* value is commented in values.yaml or listed in the README/docs values table.
+  - id: NA-03
+    source: https://github.com/nebari-dev/software-pack-template/blob/main/docs/release-readiness-checklist.md#nebariapp-integration
+    example: https://github.com/nebari-dev/software-pack-dashboard/blob/main/schema/pack-metadata.example.yaml
+    level: A
+    category: NA
+    check: auto
+    title: nebariapp_integration in pack-metadata.yaml matches the actual integration depth
+    expect: full when a NebariApp with routing+auth renders; partial when routing only; none when no NebariApp.
+  - id: NA-04
+    source: https://github.com/nebari-dev/software-pack-template/blob/main/docs/release-readiness-checklist.md#nebariapp-integration
+    example: https://github.com/nebari-dev/software-pack-template/blob/main/docs/auth-flow.md
+    level: B
+    category: NA
+    check: manual
+    applies: auth
+    title: Auth-protected routes reject unauthenticated requests
+    expect: Cluster verification. Pre-check that auth.enabled and enforceAtGateway are set or the app-native OAuth path is documented.
+  - id: NA-05
+    source: https://github.com/nebari-dev/software-pack-template/blob/main/docs/release-readiness-checklist.md#nebariapp-integration
+    example: https://github.com/nebari-dev/software-pack-template/blob/main/docs/auth-flow.md
+    level: B
+    category: NA
+    check: manual
+    applies: auth
+    title: Auth-protected routes admit authenticated users with the right group membership
+    expect: Cluster verification.
+  - id: NA-06
+    source: https://github.com/nebari-dev/software-pack-template/blob/main/docs/release-readiness-checklist.md#nebariapp-integration
+    example: https://github.com/nebari-dev/software-pack-template/blob/main/examples/basic-nginx/chart/templates/deployment.yaml
+    level: B
+    category: NA
+    check: auto
+    title: Health and readiness probes configured
+    expect: Every long-running workload container has liveness and readiness probes.
+
+  - id: NA-07
+    source: https://github.com/nebari-dev/software-pack-template/blob/main/docs/nebariapp-crd-reference.md
+    example: https://github.com/nebari-dev/harbor-pack/blob/main/chart/templates/nebariapp.yaml
+    level: A
+    category: NA
+    check: auto
+    title: NebariApp spec validates against the CRD and resolves to a rendered Service (auditor-added pre-check)
+    expect: >
+      Not in the upstream checklist; added because it is the cheapest predictor of
+      NA-01. Only CRD fields are used, spec.routing is present (omitting it means no
+      HTTPRoute on operator v0.1.1), spec.service.name/port match a rendered Service,
+      and the hostname matches the CRD pattern.
+
+  # ------------------------------------------------------------ Documentation
+  - id: DOC-01
+    source: https://github.com/nebari-dev/software-pack-template/blob/main/docs/release-readiness-checklist.md#documentation
+    example: https://github.com/nebari-dev/harbor-pack/blob/main/README.md
+    level: E
+    category: DOC
+    check: auto
+    title: README exists with what the pack does, who it is for, and a deploy command
+    expect: README.md with a runnable helm install / kubectl apply / ArgoCD snippet.
+  - id: DOC-02
+    source: https://github.com/nebari-dev/software-pack-template/blob/main/docs/release-readiness-checklist.md#documentation
+    example: https://github.com/nebari-dev/harbor-pack/blob/main/README.md#known-limitations
+    level: A
+    category: DOC
+    check: auto
+    title: README includes Prerequisites and Known Limitations sections
+    expect: Both headings present (README or linked docs), with substantive content.
+  - id: DOC-03
+    source: https://github.com/nebari-dev/software-pack-template/blob/main/docs/release-readiness-checklist.md#documentation
+    example: https://github.com/nebari-dev/harbor-pack/blob/main/README.md#authentication
+    level: B
+    category: DOC
+    check: judgment
+    applies: auth
+    title: Authentication setup is documented
+    expect: How Keycloak/OIDC is wired (gateway-enforced or app-native), which groups gate access, and what the app does with the identity.
+  - id: DOC-04
+    source: https://github.com/nebari-dev/software-pack-template/blob/main/docs/release-readiness-checklist.md#documentation
+    example: https://github.com/nebari-dev/harbor-pack/blob/main/README.md#troubleshooting
+    level: B
+    category: DOC
+    check: auto
+    title: Troubleshooting section covers common failure modes
+    expect: A Troubleshooting heading with concrete symptoms and fixes.
+  - id: DOC-05
+    source: https://github.com/nebari-dev/software-pack-template/blob/main/docs/release-readiness-checklist.md#documentation
+    example: https://github.com/nebari-dev/harbor-pack/blob/main/README.md#values-reference-pack-specific
+    level: B
+    category: DOC
+    check: judgment
+    title: Upstream chart values users must customize are documented
+    expect: A values reference that calls out the handful of keys every install must set.
+  - id: DOC-06
+    source: https://github.com/nebari-dev/software-pack-template/blob/main/docs/release-readiness-checklist.md#documentation
+    example: https://github.com/nebari-dev/langfuse-pack/blob/main/README.md#datastores
+    level: GA
+    category: DOC
+    check: auto
+    title: Performance and sizing guidance documented
+    expect: A sizing/resources section with concrete numbers.
+  - id: DOC-07
+    source: https://github.com/nebari-dev/software-pack-template/blob/main/docs/release-readiness-checklist.md#documentation
+    example: https://github.com/nebari-dev/langfuse-pack/blob/main/docs/src/content/docs/deployment.md
+    level: GA
+    category: DOC
+    check: auto
+    title: Upgrade path documented
+    expect: An upgrade/rollback section.
+  - id: DOC-08
+    source: https://github.com/nebari-dev/software-pack-template/blob/main/docs/release-readiness-checklist.md#documentation
+    example: https://github.com/nebari-dev/mlflow-pack/blob/main/CHANGELOG.md
+    level: GA
+    category: DOC
+    check: auto
+    title: CHANGELOG.md exists with notable changes
+    expect: CHANGELOG.md at the root with at least one versioned entry.
+  - id: DOC-09
+    source: https://github.com/nebari-dev/software-pack-template/blob/main/docs/pack-docs-requirements.md
+    example: https://github.com/nebari-dev/langfuse-pack/blob/main/docs/astro.config.mjs
+    level: GA
+    category: DOC
+    check: auto
+    title: Docs site compliant with pack docs requirements (Astro + @nebari/starlight)
+    expect: docs/site (or docs/astro) with astro.config using @nebari/starlight and base /<slug>/.
+
+  # ----------------------------------------------------------------- Examples
+  - id: EX-01
+    source: https://github.com/nebari-dev/software-pack-template/blob/main/docs/release-readiness-checklist.md#examples
+    example: https://github.com/nebari-dev/harbor-pack/blob/main/examples/nebari-values.yaml
+    level: A
+    category: EX
+    check: auto
+    title: At least one example values file deploys without modification (other than hostname)
+    expect: An example/values file that renders with only a hostname set; placeholders like <...> or REPLACE_ make it PARTIAL.
+  - id: EX-02
+    source: https://github.com/nebari-dev/software-pack-template/blob/main/docs/release-readiness-checklist.md#examples
+    example: https://github.com/nebari-dev/harbor-pack/blob/main/examples/nebari-values.yaml
+    level: B
+    category: EX
+    check: auto
+    title: Example values file for a full Nebari deployment (nebari-values.yaml)
+    expect: examples/nebari-values.yaml (or equivalent) with nebariapp enabled and auth configured.
+  - id: EX-03
+    source: https://github.com/nebari-dev/software-pack-template/blob/main/docs/release-readiness-checklist.md#examples
+    example: https://github.com/nebari-dev/harbor-pack/blob/main/examples/standalone-values.yaml
+    level: B
+    category: EX
+    check: auto
+    applies: standalone
+    title: Example values file for standalone deployment (standalone-values.yaml)
+    expect: examples/standalone-values.yaml (or equivalent) with nebariapp disabled.
+  - id: EX-04
+    source: https://github.com/nebari-dev/software-pack-template/blob/main/docs/release-readiness-checklist.md#examples
+    example: https://github.com/nebari-dev/harbor-pack/blob/main/examples/argocd-application.yaml
+    level: B
+    category: EX
+    check: auto
+    title: ArgoCD Application example that references the published chart
+    expect: An argoproj.io Application manifest whose repoURL is real (not a placeholder).
+
+  # ---------------------------------------------------------------- Telemetry
+  - id: TEL-01
+    source: https://github.com/nebari-dev/software-pack-template/blob/main/docs/release-readiness-checklist.md#telemetry
+    example: https://github.com/nebari-dev/lgtm-pack/blob/main/chart/values.yaml
+    level: B
+    category: TEL
+    check: judgment
+    title: Metrics discoverable by the platform collector, or documented justification for not exposing metrics
+    expect: >
+      Upstream wording says ServiceMonitor/PodMonitor, but on NIC the OpenTelemetry
+      collector DaemonSet discovers targets through `prometheus.io/scrape` /
+      `prometheus.io/port` pod annotations (role: pod) or accepts OTLP push; monitor
+      CRDs are not read. PASS when workload pods carry the scrape annotations or
+      export OTLP; a ServiceMonitor alone is PARTIAL; otherwise a documented reason.
+  - id: TEL-02
+    source: https://github.com/nebari-dev/software-pack-template/blob/main/docs/release-readiness-checklist.md#telemetry
+    example: https://github.com/nebari-dev/lgtm-pack/blob/main/README.md#opentelemetry-collector-wiring
+    level: B
+    category: TEL
+    check: judgment
+    title: Application logs go to stdout/stderr (structured format preferred)
+    expect: >
+      The platform (LGTM pack promtail / OTel collector) ships every container's
+      stdout to Loki with no pack-side config, so PASS when the app logs to
+      stdout/stderr. Upstream says "JSON preferred", not required: note plain-text
+      logging in the evidence but do not deduct. FAIL only when logs go to files or
+      a sidecar the platform cannot read.
+  - id: TEL-03
+    source: https://github.com/nebari-dev/software-pack-template/blob/main/docs/release-readiness-checklist.md#telemetry
+    example: https://github.com/nebari-dev/lgtm-pack/blob/main/README.md#contributing-dashboards-from-other-software-packs
+    level: GA
+    category: TEL
+    check: auto
+    title: Example Grafana dashboard for the LGTM stack
+    expect: >
+      A ConfigMap in the pack's own namespace labelled `grafana_dashboard: "1"`
+      (optionally annotated `grafana_folder`); the LGTM pack's sidecar watches all
+      namespaces and loads it with no coupling.
+
+  # ----------------------------------------------------------------- Security
+  - id: SEC-01
+    source: https://github.com/nebari-dev/software-pack-template/blob/main/docs/release-readiness-checklist.md#security
+    example: https://github.com/nebari-dev/langfuse-pack/blob/main/chart/values.yaml
+    level: B
+    category: SEC
+    check: auto
+    title: Containers do not run as root (or justified)
+    expect: runAsNonRoot true (or runAsUser > 0) on every container; exceptions documented.
+  - id: SEC-02
+    source: https://github.com/nebari-dev/software-pack-template/blob/main/docs/release-readiness-checklist.md#security
+    example: https://github.com/nebari-dev/harbor-pack/blob/main/chart/templates/stable-secrets-job.yaml
+    level: B
+    category: SEC
+    check: auto
+    title: No secrets hardcoded in templates or default values
+    expect: No literal credential values in values.yaml or rendered Secrets; use existingSecret / lookup / required.
+  - id: SEC-03
+    source: https://github.com/nebari-dev/software-pack-template/blob/main/docs/release-readiness-checklist.md#security
+    example: https://github.com/nebari-dev/software-pack-template/blob/main/docs/nebariapp-crd-reference.md#specauth
+    level: B
+    category: SEC
+    check: auto
+    applies: auth
+    title: OIDC scopes minimally scoped
+    expect: scopes within openid, profile, email, groups; anything else justified.
+  - id: SEC-04
+    source: https://github.com/nebari-dev/software-pack-template/blob/main/docs/release-readiness-checklist.md#security
+    example: https://github.com/nebari-dev/software-pack-template/blob/main/.github/workflows/release.yaml
+    level: B
+    category: SEC
+    check: auto
+    title: Container images pinned to a specific tag or digest (never latest)
+    expect: No image without a tag, and no mutable tags (latest, prod, main, dev, stable).
+  - id: SEC-05
+    source: https://github.com/nebari-dev/software-pack-template/blob/main/docs/release-readiness-checklist.md#security
+    example: https://github.com/nebari-dev/langfuse-pack/blob/main/chart/values.yaml
+    level: GA
+    category: SEC
+    check: auto
+    title: securityContext sets readOnlyRootFilesystem, runAsNonRoot, allowPrivilegeEscalation false
+    expect: All three on every container where possible.
+  - id: SEC-06
+    source: https://github.com/nebari-dev/software-pack-template/blob/main/docs/release-readiness-checklist.md#security
+    example: https://github.com/nebari-dev/data-science-pack/blob/main/templates/hub-nebi-networkpolicy.yaml
+    level: GA
+    category: SEC
+    check: auto
+    title: NetworkPolicy restricts unnecessary pod-to-pod traffic
+    expect: At least one NetworkPolicy in the render.
+
+  # ------------------------------------------------------ Release engineering
+  - id: RE-01
+    source: https://github.com/nebari-dev/software-pack-template/blob/main/docs/release-readiness-checklist.md#release-engineering
+    example: https://github.com/nebari-dev/software-pack-template/blob/main/.github/workflows/release.yaml
+    level: B
+    category: RE
+    check: auto
+    title: Chart packages cleanly (helm package)
+    expect: >
+      helm package succeeds. Where the packaged chart is published (nebari-dev
+      helm-repository for first-party, any reachable OCI/Helm registry for vendors)
+      is noted but not required.
+  - id: RE-02
+    source: https://github.com/nebari-dev/software-pack-template/blob/main/docs/release-readiness-checklist.md#version-tagging-convention
+    example: https://github.com/nebari-dev/harbor-pack/blob/main/.github/workflows/release.yaml
+    level: B
+    category: RE
+    check: auto
+    title: At least one pre-1.0 release exists (tag or published chart)
+    expect: At least one vX.Y.Z tag (or documented published release). Release automation is noted, not required.
+  - id: RE-03
+    source: https://github.com/nebari-dev/software-pack-template/blob/main/docs/release-readiness-checklist.md#release-engineering
+    example: https://github.com/nebari-dev/harbor-pack/blob/main/chart/Chart.yaml
+    level: B
+    category: RE
+    check: judgment
+    title: appVersion in Chart.yaml matches the upstream application version
+    expect: appVersion set and equal to the wrapped application's version.
+  - id: RE-04
+    source: https://github.com/nebari-dev/software-pack-template/blob/main/docs/release-readiness-checklist.md#version-tagging-convention
+    example: https://github.com/nebari-dev/software-pack-template/blob/main/docs/release-readiness-checklist.md#version-tagging-convention
+    level: GA
+    category: RE
+    check: auto
+    title: Chart version 1.0.0+ and tags follow the v-prefixed EffVer convention
+    expect: Chart version >= 1.0.0 and tags like v1.0.0.
+  - id: RE-05
+    source: https://github.com/nebari-dev/software-pack-template/blob/main/docs/release-readiness-checklist.md#release-engineering
+    example: https://github.com/nebari-dev/software-pack-template/blob/main/.github/workflows/build-images.yaml
+    level: GA
+    category: RE
+    check: judgment
+    title: Custom container images are published and accessible
+    expect: A build-images workflow (or documented bundle delivery) and a registry path the platform can pull from.
+  - id: RE-06
+    source: https://github.com/nebari-dev/software-pack-template/blob/main/docs/release-readiness-checklist.md#release-engineering
+    example: https://github.com/nebari-dev/software-pack-template/blob/main/README.md#release-releaseyaml
+    level: GA
+    category: RE
+    check: manual
+    applies: first-party
+    title: Chart syncs to nebari-dev/helm-repository and publishes to quay.io/nebari/charts
+    expect: First-party only.
+  - id: RE-07
+    source: https://github.com/nebari-dev/software-pack-template/blob/main/docs/release-readiness-checklist.md#release-engineering
+    example: https://github.com/nebari-dev/harbor-pack/blob/main/.github/workflows/test.yaml
+    level: GA
+    category: RE
+    check: auto
+    title: Upgrade smoke test (helm install then helm upgrade) in CI or a repeatable script
+    expect: A CI step that runs helm upgrade after helm install.
+
+  # ---------------------------------------------------------------- Pre-sales
+  - id: PS-01
+    source: https://github.com/nebari-dev/software-pack-template/blob/main/docs/release-readiness-checklist.md#pre-sales-verification
+    example: https://github.com/nebari-dev/software-pack-template/blob/main/docs/release-readiness-checklist.md#promotion-process
+    level: A
+    category: PS
+    check: manual
+    title: Pre-sales engineer has run the demo end-to-end
+  - id: PS-02
+    source: https://github.com/nebari-dev/software-pack-template/blob/main/docs/release-readiness-checklist.md#pre-sales-verification
+    example: https://github.com/nebari-dev/software-pack-template/blob/main/docs/release-readiness-checklist.md#promotion-process
+    level: B
+    category: PS
+    check: manual
+    title: Pre-sales engineer confirms the pack can be demoed without engineering on the call
+  - id: PS-03
+    source: https://github.com/nebari-dev/software-pack-template/blob/main/docs/release-readiness-checklist.md#pre-sales-verification
+    example: https://github.com/nebari-dev/software-pack-dashboard/blob/main/schema/pack-metadata.example.yaml
+    level: B
+    category: PS
+    check: manual
+    title: demo_notes in pack-metadata.yaml reflects current demo gotchas (or is empty)
+    expect: >
+      Pre-sales category is reported but never scored (decision 2026-10-09: it is a
+      process gate owned by pre-sales, not a repository property). The scanner
+      still notes whether the field exists.
+  - id: PS-04
+    source: https://github.com/nebari-dev/software-pack-template/blob/main/docs/release-readiness-checklist.md#pre-sales-verification
+    example: https://github.com/nebari-dev/software-pack-template/blob/main/docs/release-readiness-checklist.md#promotion-process
+    level: GA
+    category: PS
+    check: manual
+    title: Pre-sales engineer verified the demo flow on the GA release commit
+
+  # ----------------------------------------------------------------- Sign-off
+  - id: SO-01
+    source: https://github.com/nebari-dev/software-pack-template/blob/main/docs/release-readiness-checklist.md#sign-off
+    example: https://github.com/nebari-dev/software-pack-template/blob/main/docs/release-readiness-checklist.md#promotion-process
+    level: A
+    category: SO
+    check: manual
+    title: Pack owner approves the promotion PR
+  - id: SO-02
+    source: https://github.com/nebari-dev/software-pack-template/blob/main/docs/release-readiness-checklist.md#sign-off
+    example: https://github.com/nebari-dev/software-pack-template/blob/main/docs/release-readiness-checklist.md#promotion-process
+    level: A
+    category: SO
+    check: manual
+    title: Pre-sales rep approves the promotion PR
+  - id: SO-03
+    source: https://github.com/nebari-dev/software-pack-template/blob/main/docs/release-readiness-checklist.md#sign-off
+    example: https://github.com/nebari-dev/software-pack-template/blob/main/docs/release-readiness-checklist.md#promotion-process
+    level: B
+    category: SO
+    check: manual
+    title: Tech lead approves the promotion PR
+  - id: SO-04
+    source: https://github.com/nebari-dev/software-pack-template/blob/main/docs/release-readiness-checklist.md#sign-off
+    example: https://github.com/nebari-dev/software-pack-template/blob/main/docs/release-readiness-checklist.md#promotion-process
+    level: GA
+    category: SO
+    check: manual
+    title: Product owner has documented and verified acceptance criteria
+  - id: SO-05
+    source: https://github.com/nebari-dev/software-pack-template/blob/main/docs/release-readiness-checklist.md#sign-off
+    example: https://github.com/nebari-dev/software-pack-template/blob/main/docs/release-readiness-checklist.md#promotion-process
+    level: GA
+    category: SO
+    check: manual
+    title: Product owner approves the promotion PR
