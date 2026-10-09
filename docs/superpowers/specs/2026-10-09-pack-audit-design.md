@@ -111,12 +111,31 @@ format, and optionally a dashboard ConfigMap. The upstream checklist's
 does not read; the auditor accepts annotations/OTLP as PASS and a bare
 ServiceMonitor as PARTIAL.
 
+**"Runs on Nebari" is a separate three-state answer, not the score.** A pack
+can score well on documentation and security while having no NebariApp at
+all, and a pack with a perfect NebariApp can still fail on a cluster. So every
+report also says `verified` (installed on a cluster with the operator and the
+NebariApp reached Ready), `likely` (static NA-07 pre-check passes), or `no`.
+`audit.py verify` reuses the template's `dev/Makefile` cluster recipe to move
+packs from likely to verified without a person, and writes the operator's own
+condition reasons (`NamespaceNotOptedIn`, `ServiceNotFound`,
+`CertificateNotReady`) into the report when it fails.
+
+**Findings export in standard formats.** The results JSON is the source of
+truth, and `audit.py export` renders it as SARIF 2.1.0 (rule id = checklist
+id, `helpUri` = the rule link), JUnit XML (one suite per maturity level), or
+CSV, so GitHub code scanning, GitLab test reports, and spreadsheets can
+consume the same findings without a custom parser.
+
 ## Known limits
 
 - Heading regexes are crude; the agent is expected to correct false
   positives/negatives and record `override:` reasons.
-- No cluster: `NA-01`, `NA-04`, `NA-05`, `IN-01` stay MANUAL. A follow-up could
-  drive `dev/Makefile` or `action-nebari-sandbox` to close them.
+- `NA-05` (group membership) and `IN-01` (README-only install) still need a
+  person; `verify` closes `NA-01` and `NA-04` only.
+- `verify` was written against this repo's `dev/Makefile` and the operator's
+  dev scripts but has not yet been exercised end to end on a kind cluster from
+  this tool; its `--dry-run` plan has.
 - Multi-chart repos with no pack chart (one chart per upstream component)
   score against the first chart that fronts the user-facing app; the structural
   problem is reported but not scored per chart.

@@ -47,16 +47,16 @@ route, TLS, and Keycloak OIDC. The promotion rubric is that repo's
 
 # Where the tooling lives
 
-`TOOL_DIR` is `tools/pack-audit/` in this repository (or the path the user
-gives you when the tool has been copied elsewhere). Everything below is
-relative to `TOOL_DIR` unless it starts with `docs/`.
+Resolve `TOOL_DIR` as the first of these that contains `audit.py`:
+`tools/pack-audit/` (inside software-pack-template), `software-pack-audit/`
+(this workspace), or the path the user gives you. Everything below is relative
+to `TOOL_DIR`.
 
 - `audit.py` deterministic scanner and scorer
 - `checklist.yaml` the rubric (ids, levels, categories, check type, expectation)
-- `docs/release-readiness-checklist.md` (repo root) the rubric text
-- `docs/nebariapp-crd-reference.md` (repo root) NebariApp field reference
-- `reference/pack-metadata.schema.json` dashboard schema (vendored from
-  nebari-dev/software-pack-dashboard; refresh when that changes)
+- `reference/upstream-release-readiness-checklist.md` upstream rubric text
+- `reference/upstream-nebariapp-crd-reference.md` NebariApp field reference
+- `reference/pack-metadata.schema.json` dashboard schema
 - `reference/template-conventions.md` what a healthy pack looks like, distilled
   from the template and the first-party packs
 - `reports/` output
@@ -77,6 +77,18 @@ relative to `TOOL_DIR` unless it starts with `docs/`.
    `.gitlab-ci.yml`), and rerun with `--values` / `--set`. Record what you
    needed; a chart that cannot render from its documented example is itself a
    finding.
+
+2b. **Verify on a cluster when asked or when the environment allows.** If the
+   user asked for cluster verification, or `docker`, `kind`, `kubectl`, `helm`
+   and `make` are all available and the user has not objected to a local kind
+   cluster being created, run
+   `python3 -I TOOL_DIR/audit.py verify reports/<pack>.json [--chart <dir>]`
+   after the scan. It installs the pack on a throwaway kind cluster running the
+   Nebari stack, records NA-01 / NA-04, and sets "Runs on Nebari" to verified or
+   no. Run `--dry-run` first and show the plan if the user has not seen it
+   before. Never run it against a cluster the user did not name as disposable.
+   Without a cluster, the field stays at "likely" or "no" from the static
+   check, and you say so in the verdict.
 
 3. **Read the pack like a platform engineer.** Read, at minimum: the README,
    `Chart.yaml`, `values.yaml`, every `templates/*.yaml` that renders a
@@ -163,5 +175,7 @@ relative to `TOOL_DIR` unless it starts with `docs/`.
   {enabled: true}}` under `nebariapp:` in chart/values.yaml", not "improve
   routing".
 - Report completion with the path to `reports/<pack>.md`, the score, the
-  achieved level, and the top three fixes. End with one line offering fix
+  achieved level, the "Runs on Nebari" state (and whether it is verified or
+  static), and the top three fixes. Mention `audit.py export --format sarif|junit`
+  when the user's CI or review tooling could ingest the findings. End with one line offering fix
   mode for named items; do not start it.

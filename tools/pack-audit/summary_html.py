@@ -98,6 +98,10 @@ def build(results: list[dict], checklist: dict, narratives: dict[str, dict[str, 
         lv = r["score"]["repo_level"]
         return LEVEL_NAME[lv] if lv else "below Experimental"
 
+    def ron(r):
+        x = r["score"].get("runs_on_nebari") or {"state": "unknown", "reason": ""}
+        return f"<span class='ron ron-{x['state']}' title='{html.escape(x.get('reason', ''))}'>{x['state']}</span>"
+
     rows = []
     for r in packs + baseline:
         sc = r["score"]
@@ -106,7 +110,7 @@ def build(results: list[dict], checklist: dict, narratives: dict[str, dict[str, 
             f"<tr class='{'baseline' if r in baseline else ''}'><th scope='row'><a href='#pack-{r['name']}'>{html.escape(r['name'])}</a>"
             + ("<span class='tag'>baseline, first-party</span>" if r in baseline else "") + "</th>"
             f"<td class='num'><div class='meter'><i style='width:{sc['overall_pct']}%'></i></div><b>{sc['overall_pct']}%</b></td>"
-            f"<td>{level_cell(r)}</td><td>{html.escape(str(r['facts'].get('detected_integration')))}</td>"
+            f"<td>{level_cell(r)}</td><td>{ron(r)}</td><td>{html.escape(str(r['facts'].get('detected_integration')))}</td>"
             + "".join(f"<td class='num'>{b[lv]}</td>" for lv in LEVELS) + "</tr>")
 
     cat_head = "".join(f"<th>{html.escape(r['name'])}</th>" for r in packs + baseline)
@@ -162,7 +166,7 @@ def build(results: list[dict], checklist: dict, narratives: dict[str, dict[str, 
       <p class="src">{src}<br>chart <code>{html.escape(str(f.get('primary_chart')))}</code> {html.escape(str((f.get('chart_yaml') or {}).get('version')))}
       · NebariApp integration <b>{html.escape(str(f.get('detected_integration')))}</b> · scanned {html.escape(f['scanned_at'][:10])}</p>
     </div>
-    <div class="score"><span class="big">{sc['overall_pct']}%</span><span class="lvl-big">{level_cell(r)}</span></div>
+    <div class="score"><span class="big">{sc['overall_pct']}%</span><span class="lvl-big">{level_cell(r)}</span><span class="lvl-big">Runs on Nebari: {ron(r)}</span></div>
   </header>
   <div class="cols">
     <div class="col">
@@ -245,11 +249,14 @@ details {{ border-top:1px solid var(--line); margin-top:14px; padding-top:10px; 
 summary {{ cursor:pointer; font-weight:500; }}
 summary:focus-visible, a:focus-visible {{ outline:2px solid var(--accent); outline-offset:2px; }}
 .st {{ display:inline-block; font-size:11px; font-weight:600; letter-spacing:.04em; padding:1px 7px; border-radius:4px; }}
+.ron {{ display:inline-block; font-size:12px; font-weight:600; padding:1px 8px; border-radius:999px; }}
+.ron-verified {{ background:var(--ok-bg); color:var(--ok); }} .ron-likely {{ background:var(--warn-bg); color:var(--warn); }}
+.ron-no {{ background:var(--bad-bg); color:var(--bad); }} .ron-unknown {{ background:var(--neutral-bg); color:var(--neutral); }}
 .st-pass {{ background:var(--ok-bg); color:var(--ok); }} .st-partial {{ background:var(--warn-bg); color:var(--warn); }}
 .st-fail {{ background:var(--bad-bg); color:var(--bad); }} .st-manual, .st-na, .st-judgment {{ background:var(--neutral-bg); color:var(--neutral); }}
 .checks td.ev {{ font-size:13px; color:var(--muted); min-width:260px; }}
 .checks td.src-cell {{ white-space:nowrap; font-size:13px; }}
-.legend {{ display:flex; gap:14px; flex-wrap:wrap; font-size:13px; color:var(--muted); margin:10px 0 0; }}
+.legend {{ display:flex; flex-direction:column; gap:4px; font-size:13px; color:var(--muted); margin:10px 0 0; max-width:none; }}
 a {{ color:var(--accent); }}
 @media (prefers-reduced-motion: reduce) {{ * {{ transition:none !important; }} }}
 </style>
@@ -262,10 +269,11 @@ a {{ color:var(--accent); }}
 
   <h3>Overview</h3>
   <div class="tbl"><table>
-    <thead><tr><th>Pack</th><th class="num">Score</th><th>Repo-readiness level</th><th>NebariApp</th>
+    <thead><tr><th>Pack</th><th class="num">Score</th><th>Repo-readiness level</th><th>Runs on Nebari</th><th>NebariApp</th>
     <th class="num">E blockers</th><th class="num">A blockers</th><th class="num">B blockers</th><th class="num">GA blockers</th></tr></thead>
     <tbody>{''.join(rows)}</tbody></table></div>
-  <p class="legend"><span>NebariApp: full = routing + gateway auth render · partial = NebariApp without auth · none = no NebariApp</span></p>
+  <p class="legend"><span>Runs on Nebari: verified = installed on a cluster with the operator and NebariApp reached Ready · likely = NebariApp renders with valid CRD fields, explicit routing and a resolvable Service (static only) · no = no NebariApp or spec fails</span>
+  <span>NebariApp: full = routing + gateway auth render · partial = NebariApp without auth · none = no NebariApp</span></p>
 
   <h3>Category scores</h3>
   <div class="tbl"><table><thead><tr><th>Category</th>{cat_head}</tr></thead><tbody>{''.join(cat_rows)}</tbody></table></div>

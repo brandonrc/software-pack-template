@@ -16,6 +16,16 @@ Usage:
   audit.py summary <results.json> [<results.json> ...] [--out SUMMARY.md]
       Cross-pack comparison table, shared gaps, and gate blockers per pack.
 
+  audit.py verify <results.json> [--chart <dir>] [--cluster NAME] [--dry-run] [--keep]
+      Install the pack on a local kind cluster running the Nebari stack (created
+      with the template's dev/Makefile), wait for the NebariApp Ready condition,
+      probe the hostname through the gateway, and write NA-01 / NA-04 back.
+      Turns "Runs on Nebari: likely" into "verified" or "no" with the operator's reason.
+
+  audit.py export <results.json> --format sarif|junit|csv [--out FILE]
+      SARIF 2.1.0 (GitHub code scanning, VS Code), JUnit XML (GitLab/Jenkins test
+      reports), or CSV, from the same results JSON.
+
 Statuses: PASS, PARTIAL, FAIL, JUDGMENT (pending), MANUAL (needs cluster/person),
 NA (does not apply).
 
@@ -1146,8 +1156,32 @@ def score(result: dict, checklist: dict) -> dict:
         if cum_ok:
             achieved = lv
     return {"overall_pct": round(100 * got / tot, 1) if tot else None, "weighted_points": round(got, 2), "weighted_total": round(tot, 2),
+            "runs_on_nebari": runs_on_nebari(result),
             "per_level": per_level, "per_category": {k: {**v, "pct": round(100 * v["earned"] / v["scorable"], 0) if v["scorable"] else None} for k, v in per_cat.items()},
             "repo_level": achieved, "blockers": blockers, "pending": pending}
+
+
+def runs_on_nebari(result: dict) -> dict:
+    """Three-state answer to 'will this run on Nebari?'.
+
+    verified: installed on a cluster with the operator; NebariApp Ready (NA-01 PASS)
+    likely:   NebariApp renders with only CRD fields, explicit routing, resolvable service (NA-07 PASS)
+    no:       no NebariApp, or the spec fails the CRD pre-check
+    A verified-but-failed cluster run reports 'no' with the operator's reason.
+    """
+    c = result["checks"]
+    na01 = c.get("NA-01", {}).get("status")
+    na07 = c.get("NA-07", {}).get("status")
+    v = result["facts"].get("verify") or {}
+    if na01 == "PASS":
+        return {"state": "verified", "reason": c["NA-01"]["evidence"][:200]}
+    if na01 == "FAIL" and v.get("ran"):
+        return {"state": "no", "reason": "cluster run failed: " + c["NA-01"]["evidence"][:200]}
+    if na07 == "PASS":
+        return {"state": "likely", "reason": "static checks pass (NA-07); not yet installed on a cluster with the operator"}
+    if na07 == "PARTIAL":
+        return {"state": "likely", "reason": "advisory NebariApp spec issues (NA-07); not yet verified on a cluster"}
+    return {"state": "no", "reason": c.get("NA-07", {}).get("evidence", "no NebariApp")[:200]}
 
 
 def level_name(checklist, lv):
@@ -1168,8 +1202,10 @@ def render_report(result: dict, checklist: dict) -> str:
     L.append(f"- NebariApp integration detected: **{f.get('detected_integration')}**  |  declared: {deep_get(f, 'pack_metadata.nebariapp_integration', '(no pack-metadata.yaml)')}  |  manifests inspected from the {f.get('analysis_mode') or 'no'} render")
     L.append("")
     L.append("## Readiness score\n")
+    ron = sc.get("runs_on_nebari") or runs_on_nebari(result)
     L.append(f"**Overall: {sc['overall_pct']}%**  (weighted {sc['weighted_points']}/{sc['weighted_total']})  |  "
-             f"**Repo-readiness level: {level_name(checklist, sc['repo_level'])}**\n")
+             f"**Repo-readiness level: {level_name(checklist, sc['repo_level'])}**  |  "
+             f"**Runs on Nebari: {ron['state']}** ({ron['reason']})\n")
     L.append("| Level | Scorable | Pass | Partial | Fail | Pending judgment | Manual | Gate |")
     L.append("|---|---|---|---|---|---|---|---|")
     cum = True
@@ -1252,13 +1288,13 @@ def render_summary(results: list[dict], checklist: dict) -> str:
          "Scores weight items by the level at which they block promotion (E=4, A=3, B=2, GA=1); "
          "the repo-readiness level is the highest level with no FAIL/PARTIAL at or below it. "
          "MANUAL (cluster/person) and NA items are excluded.\n"]
-    L.append("| Pack | Score | Repo-readiness level | Integration | E blockers | A blockers | B blockers | GA blockers | Pending judgment |")
-    L.append("|---|---|---|---|---|---|---|---|---|")
+    L.append("| Pack | Score | Repo-readiness level | Runs on Nebari | Integration | E blockers | A blockers | B blockers | GA blockers | Pending judgment |")
+    L.append("|---|---|---|---|---|---|---|---|---|---|")
     for r in sorted(results, key=lambda r: -(r["score"]["overall_pct"] or 0)):
         sc = r["score"]
         b = {lv: len(sc["blockers"][lv]) for lv in LEVEL_ORDER}
         pend = sum(len([c for c in sc["pending"][lv] if r["checks"].get(c, {}).get("status") == "JUDGMENT"]) for lv in LEVEL_ORDER)
-        L.append(f"| {r['name']} | {sc['overall_pct']}% | {level_name(checklist, sc['repo_level'])} | {r['facts'].get('detected_integration')} | "
+        L.append(f"| {r['name']} | {sc['overall_pct']}% | {level_name(checklist, sc['repo_level'])} | {(sc.get('runs_on_nebari') or runs_on_nebari(r))['state']} | {r['facts'].get('detected_integration')} | "
                  f"{b['E']} | {b['A']} | {b['B']} | {b['GA']} | {pend} |")
     L.append("")
     L.append("## Category scores\n")
@@ -1298,6 +1334,196 @@ def render_summary(results: list[dict], checklist: dict) -> str:
     return "\n".join(L) + "\n"
 
 
+# ----------------------------------------------------------------------------- verify (kind + operator)
+
+
+def verify(args, checklist: dict) -> dict:
+    """Install the pack on a local kind cluster that runs the Nebari stack and record NA-01 / NA-04.
+
+    The cluster comes from the template's dev/Makefile `cluster` target (MetalLB, Envoy Gateway,
+    cert-manager, Keycloak, nebari-operator). Nothing here touches the pack repository.
+    """
+    res = json.loads(read(Path(args.results)))
+    f = res["facts"]
+    name = res["name"]
+    host = args.hostname or f"{re.sub(r'[^a-z0-9-]', '-', name.lower())[:40]}.nebari.local"
+    ns = args.namespace or f"{re.sub(r'[^a-z0-9-]', '-', name.lower())[:40]}-verify"
+    release = "verify"
+    chart = Path(res["source"]) / (f.get("primary_chart") or ".")
+    if res.get("ref"):
+        chart = None  # branch content lives in a temp export; the caller must pass --chart
+    if args.chart:
+        chart = Path(args.chart)
+    if chart is None or not (chart / "Chart.yaml").exists():
+        sys.exit("verify: pass --chart <dir> pointing at the pack chart (branch audits export to a temp dir)")
+    vk = (f.get("nebariapp_wiring") or {}).get("values_key")
+    if not vk:
+        sys.exit("verify: this pack has no nebariapp toggle in values.yaml; nothing to verify (runs_on_nebari=no)")
+    ren = ((f.get("helm") or {}).get("renders") or {}).get("nebariapp-enabled") or {}
+    values = [v for v in ren.get("values", [])] + list(args.values or [])
+    sets = [x for x in ren.get("sets", []) if not x.startswith(f"{vk}.hostname=")] + list(args.set or [])
+    sets = [x for x in sets if not x.startswith(f"{vk}.enabled=")] + [f"{vk}.enabled=true", f"{vk}.hostname={host}"]
+    dev_dir = Path(args.template_dev or (HERE.parent.parent / "dev"))
+    cluster = args.cluster
+    plan = []
+
+    def step(desc, cmd, timeout=600, check=True):
+        plan.append((desc, cmd))
+        if args.dry_run:
+            print(f"[dry-run] {desc}\n    $ {' '.join(cmd)}")
+            return 0, "", ""
+        print(f"==> {desc}")
+        rc, out, err = sh(cmd, timeout=timeout)
+        if rc != 0 and check:
+            print(err[-800:] or out[-800:])
+        return rc, out, err
+
+    for tool in ("docker", "kind", "kubectl", "helm", "make"):
+        if not have(tool) and not args.dry_run:
+            sys.exit(f"verify: {tool} is required on PATH")
+    rc, out, _ = step("list kind clusters", ["kind", "get", "clusters"], check=False)
+    if cluster not in out.split() or args.dry_run:
+        if not (dev_dir / "Makefile").exists() and not args.dry_run:
+            sys.exit(f"verify: template dev/Makefile not found at {dev_dir}; pass --template-dev")
+        step("create the Nebari dev cluster (MetalLB, Envoy Gateway, cert-manager, Keycloak, operator); first run ~5-10 min",
+             ["make", "-C", str(dev_dir), "cluster", f"CLUSTER_NAME={cluster}"], timeout=1800)
+    step("use the kind context", ["kubectl", "config", "use-context", f"kind-{cluster}"])
+    step("create namespace", ["kubectl", "create", "namespace", ns, "--dry-run=client", "-o", "yaml"], check=False)
+    if not args.dry_run:
+        sh(["bash", "-c", f"kubectl create namespace {ns} --dry-run=client -o yaml | kubectl apply -f -"])
+    step("opt the namespace in", ["kubectl", "label", "namespace", ns, "nebari.dev/managed=true", "--overwrite"])
+    step("fetch chart dependencies", ["helm", "dependency", "build", str(chart)], check=False)
+    cmd = ["helm", "upgrade", "--install", release, str(chart), "-n", ns, "--wait", "--timeout", args.timeout]
+    for v in values:
+        cmd += ["-f", v]
+    for x in sets:
+        cmd += ["--set", x]
+    rc, out, err = step("install the pack with the NebariApp enabled", cmd, timeout=1500)
+    result = {"ran": not args.dry_run, "cluster": cluster, "namespace": ns, "hostname": host, "install_ok": rc == 0,
+              "install_error": err[-600:] if rc else "", "conditions": [], "nebariapps": [], "redirect": None}
+    if not args.dry_run and rc != 0:
+        result["conditions_note"] = "helm install failed"
+    rc2, out2, _ = step("wait for the NebariApp Ready condition",
+                        ["kubectl", "wait", "-n", ns, "nebariapp", "--all", "--for=condition=Ready", f"--timeout={args.timeout}"], timeout=900, check=False)
+    rc3, out3, _ = step("collect NebariApp status", ["kubectl", "get", "nebariapp", "-n", ns, "-o", "json"], check=False)
+    if not args.dry_run and rc3 == 0:
+        try:
+            items = json.loads(out3).get("items", [])
+            for it in items:
+                conds = {c["type"]: {"status": c.get("status"), "reason": c.get("reason"), "message": (c.get("message") or "")[:160]}
+                         for c in (it.get("status", {}).get("conditions") or [])}
+                result["nebariapps"].append({"name": it["metadata"]["name"], "conditions": conds})
+        except Exception as e:  # noqa: BLE001
+            result["conditions_note"] = f"could not parse NebariApp status: {e}"
+    rc4, ip, _ = step("find the gateway IP",
+                      ["kubectl", "get", "svc", "-n", "envoy-gateway-system", "-l", "gateway.envoyproxy.io/owning-gateway-name=nebari-gateway",
+                       "-o", "jsonpath={.items[0].status.loadBalancer.ingress[0].ip}"], check=False)
+    ip = ip.strip()
+    if ip or args.dry_run:
+        rc5, out5, _ = step("request the hostname through the gateway (expect 302 to Keycloak when auth is enabled, 200 otherwise)",
+                            ["curl", "-k", "-sS", "-o", "/dev/null", "--max-time", "20", "--resolve", f"{host}:443:{ip or '<gateway-ip>'}",
+                             "-w", "%{http_code} %{redirect_url}", f"https://{host}/"], timeout=60, check=False)
+        if not args.dry_run and rc5 == 0:
+            code, _, loc = out5.strip().partition(" ")
+            result["redirect"] = {"code": code, "location": loc}
+    if not args.keep and not args.dry_run:
+        step("uninstall the release", ["helm", "uninstall", release, "-n", ns, "--wait"], check=False)
+        step("delete the namespace", ["kubectl", "delete", "namespace", ns, "--wait=false"], check=False)
+    if args.dry_run:
+        print(f"[dry-run] would write NA-01 / NA-04 into {args.results} and rescore")
+        return res
+    # ---- write back
+    ready = bool(result["nebariapps"]) and all(n["conditions"].get("Ready", {}).get("status") == "True" for n in result["nebariapps"])
+    detail = [f"{n['name']}: " + ", ".join(f"{k}={v['status']}" + (f" ({v['reason']})" if v['status'] != 'True' and v.get('reason') else "") for k, v in n["conditions"].items()) for n in result["nebariapps"]]
+    if ready:
+        res["checks"]["NA-01"] = {"status": "PASS", "evidence": f"verified on kind cluster '{cluster}' with nebari-operator: NebariApp Ready; conditions " + "; ".join(detail)[:300], "detail": detail}
+    else:
+        why = result["install_error"][-200:] if not result["install_ok"] else ("; ".join(detail) or result.get("conditions_note") or "no NebariApp reached Ready")
+        res["checks"]["NA-01"] = {"status": "FAIL", "evidence": f"cluster run on '{cluster}' did not reach Ready: {why}"[:400], "detail": detail}
+    auth_on = bool(res["facts"].get("nebariapp_auth_enabled"))
+    r = result["redirect"]
+    if r and auth_on:
+        ok = r["code"].startswith("3") and ("keycloak" in r["location"] or "/realms/" in r["location"] or "openid" in r["location"])
+        res["checks"]["NA-04"] = {"status": "PASS" if ok else "FAIL", "evidence": f"anonymous GET https://{host}/ -> {r['code']} {r['location'][:120]}", "detail": []}
+    elif r:
+        res["checks"]["NA-04"] = {"status": "NA", "evidence": f"auth disabled; anonymous GET -> {r['code']}", "detail": []}
+    res["facts"]["verify"] = result
+    res["score"] = score(res, checklist)
+    Path(args.results).write_text(json.dumps(res, indent=2, default=str))
+    outp = Path(args.results).with_suffix(".md")
+    md = render_report(res, checklist)
+    if outp.exists() and "\n# Software-pack audit:" in outp.read_text():
+        narrative = outp.read_text().split("\n# Software-pack audit:", 1)[0].rstrip()
+        md = (narrative + "\n\n" + md) if narrative else md
+    outp.write_text(md)
+    print(f"{name}: runs_on_nebari={res['score']['runs_on_nebari']['state']}  NA-01={res['checks']['NA-01']['status']}  NA-04={res['checks'].get('NA-04', {}).get('status')}  -> {outp}")
+    return res
+
+
+# ----------------------------------------------------------------------------- export (SARIF / JUnit / CSV)
+
+SARIF_LEVEL = {"FAIL": "error", "PARTIAL": "warning", "JUDGMENT": "note", "MANUAL": "note"}
+
+
+def export(res: dict, checklist: dict, fmt: str) -> str:
+    items = {i["id"]: i for i in checklist["items"] if i.get("enabled", True) is not False}
+    cats = checklist["categories"]
+    name = res["name"]
+    if fmt == "csv":
+        import csv, io
+        buf = io.StringIO(); w = csv.writer(buf)
+        w.writerow(["pack", "id", "level", "category", "status", "title", "evidence", "source", "example"])
+        for cid, it in items.items():
+            ch = res["checks"].get(cid, {"status": "JUDGMENT", "evidence": ""})
+            w.writerow([name, cid, it["level"], cats[it["category"]], ch["status"], it["title"], ch["evidence"], it.get("source", ""), it.get("example", "")])
+        return buf.getvalue()
+    if fmt == "junit":
+        import xml.etree.ElementTree as ET
+        suites = ET.Element("testsuites", name=f"pack-audit {name}")
+        for lv in LEVEL_ORDER:
+            lv_items = [(cid, it) for cid, it in items.items() if it["level"] == lv]
+            suite = ET.SubElement(suites, "testsuite", name=f"{name} {checklist['levels'][lv]['name']}", tests=str(len(lv_items)))
+            fails = skips = 0
+            for cid, it in lv_items:
+                ch = res["checks"].get(cid, {"status": "JUDGMENT", "evidence": ""})
+                tc = ET.SubElement(suite, "testcase", classname=f"{name}.{cats[it['category']]}", name=f"{cid} {it['title']}")
+                if ch["status"] in ("FAIL", "PARTIAL"):
+                    fails += 1
+                    fe = ET.SubElement(tc, "failure", message=f"{ch['status']}: {ch['evidence'][:200]}", type=ch["status"])
+                    fe.text = ch["evidence"] + ("\n" + "\n".join(map(str, ch.get("detail") or [])) if ch.get("detail") else "") + (f"\nrule: {it.get('source', '')}" if it.get("source") else "")
+                elif ch["status"] in ("MANUAL", "NA", "JUDGMENT"):
+                    skips += 1
+                    ET.SubElement(tc, "skipped", message=f"{ch['status']}: {ch['evidence'][:200]}")
+                else:
+                    ET.SubElement(tc, "system-out").text = ch["evidence"]
+            suite.set("failures", str(fails)); suite.set("skipped", str(skips))
+        ET.indent(suites)
+        return '<?xml version="1.0" encoding="UTF-8"?>\n' + ET.tostring(suites, encoding="unicode")
+    if fmt == "sarif":
+        rules, results = [], []
+        for cid, it in items.items():
+            rules.append({"id": cid, "name": cid.replace("-", ""), "shortDescription": {"text": it["title"]},
+                          "fullDescription": {"text": (it.get("expect") or it["title"]).strip()},
+                          "helpUri": it.get("source", ""),
+                          "properties": {"level": it["level"], "category": cats[it["category"]], "example": it.get("example", "")}})
+            ch = res["checks"].get(cid)
+            if not ch or ch["status"] not in SARIF_LEVEL:
+                continue
+            msg = f"[{ch['status']}] {it['title']}: {ch['evidence']}"
+            r = {"ruleId": cid, "level": SARIF_LEVEL[ch["status"]], "message": {"text": msg},
+                 "locations": [{"physicalLocation": {"artifactLocation": {"uri": (res["facts"].get("primary_chart") or ".") + "/Chart.yaml", "uriBaseId": "SRCROOT"}}}],
+                 "properties": {"status": ch["status"], "maturityLevel": it["level"], "detail": [str(x) for x in (ch.get("detail") or [])][:12]}}
+            results.append(r)
+        sc = res["score"]
+        return json.dumps({"$schema": "https://json.schemastore.org/sarif-2.1.0.json", "version": "2.1.0", "runs": [{
+            "tool": {"driver": {"name": "pack-audit", "informationUri": "https://github.com/nebari-dev/software-pack-template/tree/main/tools/pack-audit",
+                                "version": "0.1.0", "rules": rules}},
+            "originalUriBaseIds": {"SRCROOT": {"uri": "file://" + res["source"].rstrip("/") + "/"}},
+            "properties": {"pack": name, "overall_pct": sc["overall_pct"], "repo_level": sc["repo_level"], "runs_on_nebari": sc.get("runs_on_nebari")},
+            "results": results}]}, indent=2)
+    sys.exit(f"unknown format {fmt}")
+
+
 # ----------------------------------------------------------------------------- CLI
 
 
@@ -1318,6 +1544,22 @@ def main():
     m = sub.add_parser("summary", help="cross-pack SUMMARY.md from several results JSON files")
     m.add_argument("results", nargs="+")
     m.add_argument("--out")
+    v = sub.add_parser("verify", help="install on a local kind cluster running the Nebari stack; records NA-01/NA-04 (needs docker, kind, kubectl, helm, make)")
+    v.add_argument("results")
+    v.add_argument("--chart", help="chart directory (required for --ref audits, otherwise taken from the results)")
+    v.add_argument("--cluster", default="pack-audit-verify")
+    v.add_argument("--template-dev", help="path to software-pack-template/dev (default: ../../dev relative to audit.py)")
+    v.add_argument("--hostname", help="default <pack>.nebari.local")
+    v.add_argument("--namespace")
+    v.add_argument("--values", action="append")
+    v.add_argument("--set", action="append")
+    v.add_argument("--timeout", default="5m")
+    v.add_argument("--keep", action="store_true", help="leave the release and namespace installed")
+    v.add_argument("--dry-run", action="store_true", help="print the commands without running them")
+    e = sub.add_parser("export", help="export a results JSON as sarif, junit, or csv")
+    e.add_argument("results")
+    e.add_argument("--format", choices=["sarif", "junit", "csv"], required=True)
+    e.add_argument("--out")
     args = ap.parse_args()
     checklist = yaml.safe_load(read(CHECKLIST))
     if args.cmd == "scan":
@@ -1341,6 +1583,16 @@ def main():
         sc = res["score"]
         print(f"{res['name']}: {sc['overall_pct']}%  repo-level={sc['repo_level']}  "
               f"pending-judgment={sum(len(v) for v in sc['pending'].values())}  -> {out / (res['name'] + '.md')}")
+    elif args.cmd == "verify":
+        verify(args, checklist)
+    elif args.cmd == "export":
+        res = json.loads(read(Path(args.results)))
+        res["score"] = score(res, checklist)
+        text = export(res, checklist, args.format)
+        ext = {"sarif": ".sarif", "junit": ".junit.xml", "csv": ".csv"}[args.format]
+        outp = Path(args.out) if args.out else Path(args.results).with_suffix(ext)
+        outp.write_text(text)
+        print(f"{res['name']}: {args.format} -> {outp}")
     elif args.cmd == "summary":
         results = []
         for f in args.results:
@@ -1356,6 +1608,10 @@ def main():
         Path(args.results).write_text(json.dumps(res, indent=2, default=str))
         md = render_report(res, checklist)
         outp = Path(args.out) if args.out else Path(args.results).with_suffix(".md")
+        if outp.exists() and "\n# Software-pack audit:" in outp.read_text():
+            narrative = outp.read_text().split("\n# Software-pack audit:", 1)[0].rstrip()
+            if narrative:
+                md = narrative + "\n\n" + md
         outp.write_text(md)
         print(f"{res['name']}: {res['score']['overall_pct']}%  repo-level={res['score']['repo_level']}  -> {outp}")
 

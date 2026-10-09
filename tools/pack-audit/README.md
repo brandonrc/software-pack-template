@@ -65,6 +65,48 @@ With the agent, in Claude Code:
 Use the software-pack-auditor agent to audit ../my-pack
 ```
 
+## Runs on Nebari
+
+Next to the score, every report answers "will this run on Nebari?" in three
+states, because the score alone does not say so:
+
+| State | Meaning |
+|---|---|
+| verified | installed on a cluster with the nebari-operator and the NebariApp reached `Ready` (`audit.py verify`) |
+| likely | the NebariApp renders with only CRD fields, explicit `routing`, and a service reference that resolves to a rendered Service (static check NA-07) |
+| no | no NebariApp renders, the spec fails the CRD pre-check, or a cluster run failed (with the operator's reason) |
+
+### Verifying on a cluster
+
+```bash
+python3 -I tools/pack-audit/audit.py verify tools/pack-audit/reports/my-pack.json --dry-run     # print the plan
+python3 -I tools/pack-audit/audit.py verify tools/pack-audit/reports/my-pack.json               # run it
+```
+
+`verify` creates (or reuses) a local kind cluster through the template's
+`dev/Makefile` `cluster` target, which installs MetalLB, Envoy Gateway,
+cert-manager, Keycloak, and the nebari-operator (first run takes 5 to 10
+minutes). It then installs the pack with the NebariApp enabled at
+`<pack>.nebari.local`, waits for the `Ready` condition, requests the hostname
+through the gateway (expecting a redirect to Keycloak when auth is enabled),
+writes NA-01 and NA-04 back into the results, and uninstalls the release.
+Needs `docker`, `kind`, `kubectl`, `helm`, and `make`. Pass `--chart` for
+branch audits (their content lives in a temporary export) and `--keep` to
+leave the install in place for a look.
+
+## Exporting findings for other tools
+
+```bash
+python3 -I tools/pack-audit/audit.py export tools/pack-audit/reports/my-pack.json --format sarif    # GitHub code scanning, VS Code, security dashboards
+python3 -I tools/pack-audit/audit.py export tools/pack-audit/reports/my-pack.json --format junit    # GitLab/Jenkins/Azure test reports
+python3 -I tools/pack-audit/audit.py export tools/pack-audit/reports/my-pack.json --format csv      # spreadsheets
+```
+
+FAIL and PARTIAL become SARIF `error`/`warning` results (rule id = checklist
+id, `helpUri` = the rule link) or JUnit failures grouped by maturity level;
+MANUAL, NA, and pending items are SARIF notes or JUnit skips. The JSON stays
+the source of truth.
+
 ## Statuses and scoring
 
 | Status | Meaning | Scored |
