@@ -924,7 +924,9 @@ def scan(args) -> dict:
               [str(p.relative_to(root)) for p in example_values[:8]])
     else:
         R.set("EX-01", "FAIL", "no example values file")
-    neb_ex = [p for p in example_values if re.search(r"nebari|prod|site", p.name, re.I)]
+    # A Nebari example is one named for it, or (PARTIAL) the file the NebariApp-enabled render needed.
+    enabled_used = {Path(v).resolve() for v in (helm.renders["nebariapp-enabled"]["values"] if helm and helm.renders.get("nebariapp-enabled") else [])}
+    neb_ex = [p for p in example_values if re.search(r"nebari|prod|site", p.name, re.I) or p.resolve() in enabled_used]
     R.set("EX-02", "PASS" if any("nebari" in p.name for p in neb_ex) else ("PARTIAL" if neb_ex else "FAIL"),
           ("Nebari example: " + ", ".join(p.name for p in neb_ex[:3])) if neb_ex else "no nebari-values.yaml example")
     if standalone:
