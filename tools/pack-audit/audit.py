@@ -262,8 +262,16 @@ def candidate_values_files(root: Path, chart: Path) -> list[Path]:
         if dd.is_dir():
             cands += [p for p in dd.glob("*.yaml") if "values" in p.name or p.parent.name in ("examples", "values")]
     # Exclude ArgoCD apps and non-values files.
+    # Prefer the template's examples/ convention, and Nebari-flavoured names,
+    # over local/dev profiles so EX-01 is judged on the file installers are told to use.
+    def rank(p: Path):
+        parts = {q.name for q in p.parents}
+        return (0 if "examples" in parts else 1 if "values" in parts else 2,
+                0 if "nebari" in p.name else 1,
+                1 if "dev" in parts or "local" in p.name else 0,
+                str(p))
     out = []
-    for p in sorted(set(cands)):
+    for p in sorted(set(cands), key=rank):
         if p.name == "values.yaml" and p.parent == chart:
             continue
         t = read(p, 4000)
@@ -589,15 +597,14 @@ def scan(args) -> dict:
         missing.append("README.md")
     if not license_:
         missing.append("LICENSE")
-    if not ci:
-        missing.append("CI workflow")
     if not meta_p.exists():
         missing.append("pack-metadata.yaml")
+    # CI wiring is not an Experimental-gate requirement (IN-06/IN-07/RE-07 score it; an observation notes its absence).
     if not (nk.get("template") or nk.get("library_dep") or plain_nebariapps):
         missing.append("NebariApp resource")
     layout_ok = primary is not None and (R.facts["primary_chart"] in (".", "chart") or (primary / "templates").exists())
     if not missing and layout_ok:
-        R.set("OI-01", "PASS", "chart + NebariApp + README + LICENSE + CI + pack-metadata present")
+        R.set("OI-01", "PASS", "chart + NebariApp + README + LICENSE + pack-metadata present" + ("" if ci else "; no CI workflow (noted)"))
     elif len(missing) <= 2 and (charts or kustomizations):
         R.set("OI-01", "PARTIAL", "deployable unit present but template files missing: " + ", ".join(missing))
     else:
