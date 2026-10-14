@@ -1018,6 +1018,9 @@ def scan(args) -> dict:
         val = m.group(3)
         if val.lower() in ("", "~", "null", "false", "true", "{}", "[]") or re.match(r"^[A-Z][A-Z0-9_]+$", val):
             continue  # empty, or an env-var NAME rather than a value
+        # *SecretKey / *PasswordKey / *UserKey name the key inside a Secret (bitnami, airflow): the value is a key name, not a credential.
+        if re.search(r"(?i)(.+secretkey|passwordkey|user(name)?key|tokenkey)$", m.group(1)):
+            continue
         if not m.group(1).lower().endswith(("name", "ref", "key", "file", "existingsecret", "secretname", "mountpath", "path", "secret")) or m.group(1).lower().endswith(("password", "secretkey", "accesskey", "token")):
             vd.append(f"values.yaml {m.group(1)}={m.group(3)[:20]}")
     if not lit and not vd:
