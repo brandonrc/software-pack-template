@@ -260,7 +260,7 @@ jobs:
           fi
 
   gate:
-    name: Gate on ${{ inputs.min-level }}
+    name: Gate
     needs: [scan, judge]
     if: ${{ always() && needs.scan.result == 'success' && inputs.min-level != '' }}
     runs-on: ubuntu-latest
