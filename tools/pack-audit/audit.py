@@ -6,12 +6,12 @@ Usage:
                 [--values <file> ...] [--set k=v ...] [--out <dir>]
       Inspect a pack repository, run helm/kubeconform where available, and write
       <out>/<name>.json (machine-readable) and <out>/<name>.md (human-readable).
-      Items marked `judgment` in checklist.yaml are left as JUDGMENT for the
-      auditor agent to decide.
+      Items marked `judgment` in checklist.yaml are left as JUDGMENT for
+      `audit.py judge` (or a person) to decide.
 
   audit.py report <results.json> [--out <file.md>]
-      Re-score a results file (after the agent has filled JUDGMENT items and
-      optionally overridden statuses) and regenerate the markdown report.
+      Re-score a results file (after judge or a person has filled JUDGMENT items
+      and optionally overridden statuses) and regenerate the markdown report.
 
   audit.py summary <results.json> [<results.json> ...] [--out SUMMARY.md]
       Cross-pack comparison table, shared gaps, and gate blockers per pack.
@@ -25,6 +25,21 @@ Usage:
   audit.py export <results.json> --format sarif|junit|csv [--out FILE]
       SARIF 2.1.0 (GitHub code scanning, VS Code), JUnit XML (GitLab/Jenkins test
       reports), or CSV, from the same results JSON.
+
+  audit.py judge <results.json> [--repo DIR] [--prompt-out FILE] [--ingest FILE]
+                 [--endpoint URL --model NAME] [--pending-only] [--dry-run]
+      Decide the judgment items with a language model, one request per audit.
+      --prompt-out writes one self-contained prompt for any runner (a CI step,
+      a chat window, an agent); --ingest reads that runner's answer back.
+      --endpoint POSTs the same prompt to any OpenAI-compatible
+      /chat/completions URL (OpenRouter, Ollama, vLLM, LiteLLM, Azure, OpenAI,
+      Anthropic's compatibility endpoint, ...) using PACK_AUDIT_LLM_API_KEY and
+      PACK_AUDIT_LLM_MODEL. Verdicts are written with `judge(<model>):` evidence
+      and the scanner's pre-check kept in detail, then rescored.
+
+  audit.py gate <results.json> --min-level E|A|B|GA [--fail-on-pending]
+      Exit 1 unless the repo-readiness level is at least --min-level; prints
+      the blockers. For CI.
 
 Statuses: PASS, PARTIAL, FAIL, JUDGMENT (pending), MANUAL (needs cluster/person),
 NA (does not apply).
@@ -1540,6 +1555,368 @@ def export(res: dict, checklist: dict, fmt: str) -> str:
     sys.exit(f"unknown format {fmt}")
 
 
+# ----------------------------------------------------------------------------- judge (provider-neutral LLM pass)
+
+JUDGE_STATUSES = ("PASS", "PARTIAL", "FAIL", "NA")
+TEMPLATE_REFERENCE_DOCS = {"release-readiness-checklist.md", "nebariapp-crd-reference.md", "nebariapp-template-adoption.md"}
+LOG_LINE_RE = r"stdout|stderr|loki|log[ _-]?(format|level|output|file|dir|path|json)|structured log|json log|logging(?! in)|\blogs? (to|are|go)\b"
+LEVEL_ALIASES = {"e": "E", "experimental": "E", "a": "A", "alpha": "A", "b": "B", "beta": "B", "ga": "GA"}
+JUDGE_SECTION_PATTERNS = {
+    "IN-02": HEADING_PATTERNS["prerequisites"],
+    "NA-02": HEADING_PATTERNS["values"],
+    "DOC-03": HEADING_PATTERNS["auth"],
+    "DOC-05": HEADING_PATTERNS["values"],
+    "TEL-01": r"metric|telemetry|observab|prometheus|otel|opentelemetry|monitoring|scrap",
+    "TEL-02": r"\blog|logging|loki",
+    "RE-03": r"version|upstream|release|changelog|compatib",
+    "RE-05": r"image|registry|build|bundle|offline|air.?gap|publish",
+}
+
+JUDGE_SYSTEM = """You are auditing a Nebari software-pack repository against the nebari-dev
+software-pack-template release-readiness checklist. A deterministic scanner has
+already decided everything it can; you decide only the items listed below, from
+the excerpts given. You have no other access to the repository.
+
+Statuses:
+- PASS: the expectation is met in substance, not merely by a heading with the right name.
+- PARTIAL: the material exists but is incomplete, scattered, or wrong for the Nebari
+  deployment path (NebariApp + nebari-operator, Envoy Gateway, Keycloak OIDC).
+- FAIL: missing.
+- NA: cannot apply to this pack; the evidence must say why.
+
+Rules:
+- Evidence is one sentence that cites a file path, heading, or value key from the excerpts.
+- Do not invent content. If the excerpts do not show it, it is not there: answer FAIL or
+  PARTIAL and say what is missing.
+- Where the scanner already set FAIL or NA, keep that status unless the excerpts contain
+  evidence the scanner missed, and name it.
+- Telemetry: the platform's OpenTelemetry collector discovers metrics through
+  prometheus.io/scrape pod annotations or OTLP push, not ServiceMonitor CRDs, and ships
+  every container's stdout to Loki. Plain-text stdout logging passes TEL-02.
+- Auth: app-native OIDC with enforceAtGateway false is legitimate when the docs explain
+  how the app consumes the operator-provisioned client secret.
+- Images: PASS only when the repository shows how custom images are built and where they
+  are published; a pack that only wraps upstream images with no custom image is NA.
+
+Respond with a JSON array only, no prose and no code fences:
+[{"id": "<item id>", "status": "PASS|PARTIAL|FAIL|NA", "evidence": "<one sentence>"}]
+Include every item id you were given exactly once."""
+
+
+def md_files(root: Path, limit_files: int = 12) -> dict[str, str]:
+    """README plus docs/**/*.md, relative name -> text (capped)."""
+    out: dict[str, str] = {}
+    for p in [root / "README.md"] + (rglob(root / "docs", ("*.md",)) if (root / "docs").exists() else []):
+        if p.name in TEMPLATE_REFERENCE_DOCS:  # copies of the template's own reference docs say nothing about this pack
+            continue
+        if p.exists() and p.is_file():
+            out[str(p.relative_to(root))] = read(p, 200_000)
+        if len(out) >= limit_files:
+            break
+    return out
+
+
+def md_sections(text: str, pattern: str, limit: int = 2500, max_sections: int = 2) -> list[str]:
+    """Sections (heading + body up to the next heading of the same or higher depth) whose heading matches."""
+    rx = re.compile(pattern, re.I)
+    lines = text.splitlines()
+    out: list[str] = []
+    i = 0
+    while i < len(lines) and len(out) < max_sections:
+        m = re.match(r"^(#+)\s*(.*)", lines[i])
+        if m and rx.search(m.group(2)):
+            depth = len(m.group(1))
+            j = i + 1
+            while j < len(lines):
+                m2 = re.match(r"^(#+)\s", lines[j])
+                if m2 and len(m2.group(1)) <= depth:
+                    break
+                j += 1
+            sec = "\n".join(lines[i:j]).strip()
+            out.append(sec[:limit] + ("\n[... truncated]" if len(sec) > limit else ""))
+            i = j
+        else:
+            i += 1
+    return out
+
+
+def values_block(vals_txt: str, limit: int = 4000) -> str:
+    """The pack's top-level nebariapp/nebariApp/nebari block from values.yaml, comments included."""
+    for m in re.finditer(r"^([A-Za-z_][\w-]*):[ \t]*\n", vals_txt, re.M):
+        key = m.group(1)
+        if key.lower().replace("_", "") not in ("nebariapp", "nebari"):
+            continue
+        start = m.start()
+        nxt = re.search(r"^[A-Za-z_][\w-]*:", vals_txt[m.end():], re.M)
+        end = m.end() + nxt.start() if nxt else len(vals_txt)
+        block = vals_txt[start:end].rstrip()
+        return block[:limit] + ("\n# [... truncated]" if len(block) > limit else "")
+    return ""
+
+
+def grep_lines(text: str, pattern: str, max_lines: int = 30, name: str = "") -> str:
+    rx = re.compile(pattern, re.I)
+    hits = [f"{name}:{n}: {ln.strip()}" if name else f"{n}: {ln.strip()}" for n, ln in enumerate(text.splitlines(), 1) if rx.search(ln)]
+    return "\n".join(hits[:max_lines]) + (f"\n[... {len(hits) - max_lines} more]" if len(hits) > max_lines else "")
+
+
+def judge_context(res: dict, repo: Path, cid: str, mds: dict[str, str]) -> list[tuple[str, str]]:
+    """(title, excerpt) pairs the judge needs for one checklist item. Sizes are capped so one audit stays one request."""
+    f = res["facts"]
+    a = f.get("analysis") or {}
+    readme = mds.get("README.md", "")
+    chart_dir = repo / (f.get("primary_chart") or "chart")
+    vals_txt = read(chart_dir / "values.yaml", 200_000)
+    chart_txt = read(chart_dir / "Chart.yaml", 20_000)
+    parts: list[tuple[str, str]] = []
+
+    def sections(pattern: str, limit: int = 2500, per_file: int = 2, max_total: int = 4) -> list[str]:
+        got: list[str] = []
+        for name, text in mds.items():
+            for s in md_sections(text, pattern, limit, per_file):
+                got.append(f"--- {name} ---\n{s}")
+                if len(got) >= max_total:
+                    return got
+        return got
+
+    pat = JUDGE_SECTION_PATTERNS.get(cid, "")
+    if cid == "OI-05":
+        parts.append(("README.md (first 3000 chars)", readme[:3000]))
+        parts.append(("pack-metadata.yaml description", str(deep_get(f, "pack_metadata.description", "") or "")))
+    elif cid == "IN-02":
+        secs = sections(pat)
+        parts.append(("Sections whose heading mentions prerequisites/requirements", "\n\n".join(secs)))
+        if not secs:
+            parts.append(("README.md (first 2500 chars; no prerequisites heading found)", readme[:2500]))
+    elif cid == "NA-02":
+        parts.append((f"{chart_dir.name}/values.yaml NebariApp block", values_block(vals_txt)))
+        parts.append(("Sections whose heading mentions values/configuration", "\n\n".join(sections(pat, 2000, 1, 3))))
+    elif cid == "DOC-03":
+        parts.append(("Scanner facts", f"nebariapp_auth_enabled={f.get('nebariapp_auth_enabled')} enforceAtGateway={f.get('nebariapp_enforce_gateway')}"))
+        parts.append(("Sections whose heading mentions auth/keycloak/oidc/sso", "\n\n".join(sections(pat, 3000, 2, 4))))
+    elif cid == "DOC-05":
+        parts.append(("Sections whose heading mentions values/configuration/settings", "\n\n".join(sections(pat, 2500, 2, 4))))
+        parts.append((f"{chart_dir.name}/values.yaml (first 2500 chars)", vals_txt[:2500]))
+    elif cid == "TEL-01":
+        parts.append(("Rendered manifests (scanner facts)",
+                      f"workloads={a.get('workloads')}\nscrape_annotated={a.get('scrape_annotated')}\notlp_env={a.get('otlp_env')}\n"
+                      f"monitors={a.get('monitors')}\nservice ports={a.get('services')}"))
+        parts.append(("Sections whose heading mentions metrics/telemetry/observability", "\n\n".join(sections(pat, 2000, 2, 4))))
+        parts.append(("values.yaml lines mentioning metrics/prometheus/otel", grep_lines(vals_txt, r"metric|prometheus|otel|otlp|scrape|telemetry", 25)))
+    elif cid == "TEL-02":
+        parts.append(("Sections whose heading mentions logs/logging", "\n\n".join(sections(pat, 2000, 2, 3))))
+        log_lines = "\n".join(x for x in [grep_lines(t, LOG_LINE_RE, 12, n) for n, t in mds.items()] + [grep_lines(vals_txt, LOG_LINE_RE, 15, "values.yaml")] if x)
+        parts.append(("Lines mentioning log output across README, docs, and values.yaml",
+                      log_lines or "(none: nothing in README, docs, or values.yaml mentions log files, log directories, log format, or a logging sidecar)"))
+    elif cid == "RE-03":
+        parts.append((f"{chart_dir.name}/Chart.yaml", chart_txt))
+        lock = read(chart_dir / "Chart.lock", 5000)
+        if lock:
+            parts.append((f"{chart_dir.name}/Chart.lock", lock))
+        parts.append(("Rendered image references (scanner facts)", "\n".join(sorted(set(a.get("images") or [])))))
+        parts.append(("README/docs lines mentioning versions", "\n".join(x for x in [grep_lines(t, r"\bv?\d+\.\d+(\.\d+)?\b.*(version|release|upstream|appVersion)|(version|release|upstream|appVersion).*\bv?\d+\.\d+", 10, n) for n, t in mds.items()] if x)))
+    elif cid == "RE-05":
+        parts.append(("Scanner facts", f"ci_files={list((f.get('ci_files') or {}).keys()) if isinstance(f.get('ci_files'), dict) else f.get('ci_files')}\n"
+                                        f"dockerfiles={[str(p.relative_to(repo)) for p in rglob(repo, ('Dockerfile', '*.Dockerfile', 'Containerfile'))][:10]}\n"
+                                        f"images={sorted(set(a.get('images') or []))}"))
+        parts.append(("Sections whose heading mentions images/registry/build/bundle", "\n\n".join(sections(pat, 2000, 1, 3))))
+    else:
+        parts.append(("README.md (first 2500 chars)", readme[:2500]))
+    return [(t, b) for t, b in parts if b and b.strip()]
+
+
+def build_judge_prompt(res: dict, checklist: dict, repo: Path, pending_only: bool = False) -> tuple[str, str, list[str]]:
+    """Return (system, user, item_ids). One prompt covers every judgment item so an audit is one request."""
+    items = [i for i in checklist["items"] if i.get("check") == "judgment" and i.get("enabled", True) is not False]
+    if pending_only:
+        items = [i for i in items if res["checks"].get(i["id"], {}).get("status", "JUDGMENT") == "JUDGMENT"]
+    mds = md_files(repo)
+    levels = checklist["levels"]
+    L = [f"# Pack: {res['name']}", f"Source: {res['source']}" + (f" @ {res['ref']}" if res.get("ref") else ""),
+         f"Primary chart: {res['facts'].get('primary_chart')}  NebariApp integration detected: {res['facts'].get('detected_integration')}", ""]
+    heads = []
+    for name, text in mds.items():
+        hs = headings(text)
+        if hs:
+            heads.append(f"{name}: " + " | ".join(hs[:25]) + (" | ..." if len(hs) > 25 else ""))
+    if heads:
+        L += ["## Document headings (for orientation)", *heads, ""]
+    L.append("## Items to decide\n")
+    for it in items:
+        cid = it["id"]
+        ch = res["checks"].get(cid, {"status": "JUDGMENT", "evidence": "", "detail": []})
+        L.append(f"### {cid}: {it['title']}")
+        L.append(f"Maturity level: {levels[it['level']]['name']}. Expectation: {(it.get('expect') or '').strip()}")
+        L.append(f"Scanner pre-check: {ch['status']}: {ch.get('evidence', '')}")
+        for d in (ch.get("detail") or [])[:4]:
+            L.append(f"  - {d}")
+        for title, body in judge_context(res, repo, cid, mds):
+            L.append(f"\n#### {title}\n```\n{body.strip()}\n```")
+        L.append("")
+    L.append("## Answer\nReturn the JSON array now, one entry per item id above: " + ", ".join(i["id"] for i in items) + ".")
+    return JUDGE_SYSTEM, "\n".join(L), [i["id"] for i in items]
+
+
+def parse_judge_answer(text: str) -> list[dict]:
+    """Tolerant JSON extraction: whole text, then a fenced block, then the outermost [...] span."""
+    t = text.strip()
+    for cand in (t, (re.search(r"```(?:json)?\s*(.*?)```", t, re.S) or [None, None])[1], t[t.find("["): t.rfind("]") + 1] if "[" in t and "]" in t else None):
+        if not cand:
+            continue
+        try:
+            data = json.loads(cand)
+        except json.JSONDecodeError:
+            continue
+        if isinstance(data, dict):
+            data = data.get("items") or data.get("results") or data.get("verdicts") or [data]
+        if isinstance(data, list):
+            return [d for d in data if isinstance(d, dict)]
+    raise ValueError("no JSON array of verdicts found in the judge answer")
+
+
+def apply_judgments(res: dict, verdicts: list[dict], allowed: list[str], decided_by: str) -> tuple[list[tuple[str, str, str]], list[dict]]:
+    applied, rejected = [], []
+    seen = set()
+    for v in verdicts:
+        cid = str(v.get("id", "")).strip().upper()
+        st = str(v.get("status", "")).strip().upper()
+        ev = " ".join(str(v.get("evidence", "")).split())
+        if cid not in allowed or cid in seen or st not in JUDGE_STATUSES or not ev:
+            rejected.append(v)
+            continue
+        seen.add(cid)
+        old = res["checks"].get(cid, {"status": "JUDGMENT", "evidence": "", "detail": []})
+        res["checks"][cid] = {"status": st, "evidence": f"judge({decided_by}): {ev}"[:600],
+                              "detail": [f"scanner: {old['status']}: {old.get('evidence', '')}"[:300]] + [str(d) for d in (old.get("detail") or [])][:3],
+                              "decided_by": decided_by}
+        applied.append((cid, old["status"], st))
+    j = res.setdefault("judge", {})
+    j.update({"decided_by": decided_by, "at": dt.datetime.now(dt.timezone.utc).isoformat(timespec="seconds"),
+              "applied": [{"id": c, "from": a, "to": b} for c, a, b in applied],
+              "missing": sorted(set(allowed) - seen), "rejected": len(rejected)})
+    return applied, rejected
+
+
+def llm_chat(base_url: str, api_key: str, model: str, system: str, user: str, max_tokens: int = 4000, timeout: int = 240) -> tuple[str, dict]:
+    """One OpenAI-style chat completion over plain HTTP. Works with any endpoint that serves /chat/completions."""
+    import urllib.error
+    import urllib.request
+    url = base_url.rstrip("/") + "/chat/completions"
+    body = {"model": model, "messages": [{"role": "system", "content": system}, {"role": "user", "content": user}],
+            "temperature": 0, "max_tokens": max_tokens}
+    headers = {"Content-Type": "application/json", "Accept": "application/json", "User-Agent": "pack-audit/0.1"}
+    if api_key:
+        headers["Authorization"] = f"Bearer {api_key}"
+    req = urllib.request.Request(url, data=json.dumps(body).encode(), headers=headers, method="POST")
+    try:
+        with urllib.request.urlopen(req, timeout=timeout) as r:
+            data = json.loads(r.read().decode())
+    except urllib.error.HTTPError as e:
+        sys.exit(f"judge endpoint {url} returned HTTP {e.code}: {e.read().decode(errors='replace')[:500]}")
+    except (urllib.error.URLError, TimeoutError) as e:
+        sys.exit(f"judge endpoint {url} unreachable: {e}")
+    try:
+        content = data["choices"][0]["message"]["content"]
+    except (KeyError, IndexError, TypeError):
+        sys.exit(f"judge endpoint returned no choices: {json.dumps(data)[:500]}")
+    if isinstance(content, list):  # some servers return content parts
+        content = "".join(p.get("text", "") for p in content if isinstance(p, dict))
+    return content, data.get("usage") or {}
+
+
+def write_results(res: dict, checklist: dict, results_path: Path, md_path: Path | None = None) -> Path:
+    """Rescore, rewrite the JSON, and regenerate the markdown while keeping any narrative above the generated report."""
+    res["score"] = score(res, checklist)
+    results_path.write_text(json.dumps(res, indent=2, default=str))
+    md = render_report(res, checklist)
+    outp = md_path or results_path.with_suffix(".md")
+    if outp.exists() and "\n# Software-pack audit:" in outp.read_text():
+        narrative = outp.read_text().split("\n# Software-pack audit:", 1)[0].rstrip()
+        if narrative:
+            md = narrative + "\n\n" + md
+    outp.write_text(md)
+    return outp
+
+
+def judge(args, checklist: dict) -> None:
+    results_path = Path(args.results)
+    res = json.loads(read(results_path))
+    repo = Path(args.repo) if args.repo else Path(res["source"])
+    if not repo.is_dir():
+        sys.exit(f"pack source {repo} is not a directory; pass --repo (branch audits export to a temporary directory that is gone)")
+    system, user, ids = build_judge_prompt(res, checklist, repo, pending_only=args.pending_only)
+    if not ids:
+        print(f"{res['name']}: nothing to judge")
+        return
+    approx_tokens = (len(system) + len(user)) // 4
+    if args.prompt_out:
+        Path(args.prompt_out).write_text(system + "\n\n" + user + "\n")
+        print(f"{res['name']}: judge prompt for {len(ids)} item(s) -> {args.prompt_out}  ({len(system) + len(user)} chars, ~{approx_tokens} tokens)")
+        if not args.ingest and not args.endpoint:
+            return
+    answer, usage, decided_by = None, {}, args.decided_by
+    if args.ingest:
+        answer = read(Path(args.ingest))
+        decided_by = decided_by or "ingest"
+    elif args.endpoint:
+        api_key = os.environ.get("PACK_AUDIT_LLM_API_KEY", "")
+        model = args.model or os.environ.get("PACK_AUDIT_LLM_MODEL", "")
+        if not model:
+            sys.exit("judge: --model or PACK_AUDIT_LLM_MODEL is required with --endpoint")
+        if args.dry_run:
+            print(f"{res['name']}: would POST ~{approx_tokens} tokens to {args.endpoint.rstrip('/')}/chat/completions model={model} (key {'set' if api_key else 'absent'})")
+            return
+        answer, usage = llm_chat(args.endpoint, api_key, model, system, user, max_tokens=args.max_tokens)
+        decided_by = decided_by or model
+    else:
+        sys.exit("judge: give --prompt-out (to run the model elsewhere), --ingest <answer-file>, or --endpoint <openai-compatible base url>")
+    try:
+        verdicts = parse_judge_answer(answer)
+    except ValueError as e:
+        Path(str(results_path.with_suffix("")) + ".judge-answer.txt").write_text(answer or "")
+        sys.exit(f"judge: {e}; raw answer kept next to the results JSON")
+    applied, rejected = apply_judgments(res, verdicts, ids, decided_by)
+    if usage:
+        res["judge"]["usage"] = usage
+    res["judge"]["prompt_chars"] = len(system) + len(user)
+    outp = write_results(res, checklist, results_path)
+    sc = res["score"]
+    for cid, a, b in applied:
+        print(f"  {cid}: {a} -> {b}")
+    if res["judge"]["missing"]:
+        print(f"  not answered: {', '.join(res['judge']['missing'])}")
+    if rejected:
+        print(f"  rejected {len(rejected)} malformed verdict(s)")
+    tok = f"  tokens in/out: {usage.get('prompt_tokens', '?')}/{usage.get('completion_tokens', '?')}" if usage else ""
+    print(f"{res['name']}: {sc['overall_pct']}%  repo-level={sc['repo_level']}  judged {len(applied)}/{len(ids)} by {decided_by}{tok}  -> {outp}")
+
+
+# ----------------------------------------------------------------------------- gate
+
+
+def gate(res: dict, checklist: dict, min_level: str, allow_pending: bool = True) -> tuple[bool, list[str]]:
+    """Exit-code friendly check: is the repo-readiness level at least min_level?"""
+    want = LEVEL_ALIASES.get(min_level.strip().lower())
+    if not want:
+        sys.exit(f"gate: unknown level {min_level!r}; use one of E, A, B, GA (or experimental, alpha, beta, ga)")
+    items = {i["id"]: i for i in checklist["items"]}
+    sc = res["score"]
+    achieved = sc["repo_level"]
+    ok = achieved is not None and LEVEL_ORDER.index(achieved) >= LEVEL_ORDER.index(want)
+    lines = [f"{res['name']}: repo-readiness level {level_name(checklist, achieved)}; required {level_name(checklist, want)}; score {sc['overall_pct']}%"]
+    for lv in LEVEL_ORDER[: LEVEL_ORDER.index(want) + 1]:
+        for cid in sc["blockers"][lv]:
+            ch = res["checks"][cid]
+            lines.append(f"  BLOCKER {lv} {cid} [{ch['status']}] {items[cid]['title']}: {ch['evidence'][:160]}")
+        pend = [c for c in sc["pending"][lv] if res["checks"].get(c, {}).get("status", "JUDGMENT") == "JUDGMENT"]
+        if pend:
+            lines.append(f"  pending judgment at {lv}: {', '.join(pend)}" + ("" if allow_pending else "  (counted as blocking)"))
+            if not allow_pending:
+                ok = False
+    lines.append("GATE: " + ("PASS" if ok else "FAIL"))
+    return ok, lines
+
+
 # ----------------------------------------------------------------------------- CLI
 
 
@@ -1576,6 +1953,21 @@ def main():
     e.add_argument("results")
     e.add_argument("--format", choices=["sarif", "junit", "csv"], required=True)
     e.add_argument("--out")
+    j = sub.add_parser("judge", help="decide the judgment items with a language model: emit a prompt, ingest an answer, or call an OpenAI-compatible endpoint")
+    j.add_argument("results")
+    j.add_argument("--repo", help="pack source directory (default: the results' source path)")
+    j.add_argument("--prompt-out", help="write the full prompt here for an external runner")
+    j.add_argument("--ingest", help="answer file produced by an external runner (JSON array, fences tolerated)")
+    j.add_argument("--endpoint", default=os.environ.get("PACK_AUDIT_LLM_BASE_URL"), help="OpenAI-compatible base URL, e.g. https://openrouter.ai/api/v1 (env PACK_AUDIT_LLM_BASE_URL)")
+    j.add_argument("--model", help="model name for --endpoint (env PACK_AUDIT_LLM_MODEL)")
+    j.add_argument("--decided-by", help="label recorded on each verdict (default: the model name, or 'ingest')")
+    j.add_argument("--pending-only", action="store_true", help="only items still JUDGMENT; default re-decides every judgment-type item, keeping scanner FAIL/NA unless evidence says otherwise")
+    j.add_argument("--max-tokens", type=int, default=4000)
+    j.add_argument("--dry-run", action="store_true", help="with --endpoint: print what would be sent, send nothing")
+    g = sub.add_parser("gate", help="exit 1 unless the repo-readiness level is at least --min-level")
+    g.add_argument("results")
+    g.add_argument("--min-level", required=True, help="E|A|B|GA or experimental|alpha|beta|ga")
+    g.add_argument("--fail-on-pending", action="store_true", help="also fail while judgment items at or below the level are undecided")
     args = ap.parse_args()
     checklist = yaml.safe_load(read(CHECKLIST))
     if args.cmd == "scan":
@@ -1609,6 +2001,14 @@ def main():
         outp = Path(args.out) if args.out else Path(args.results).with_suffix(ext)
         outp.write_text(text)
         print(f"{res['name']}: {args.format} -> {outp}")
+    elif args.cmd == "judge":
+        judge(args, checklist)
+    elif args.cmd == "gate":
+        res = json.loads(read(Path(args.results)))
+        res["score"] = score(res, checklist)
+        ok, lines = gate(res, checklist, args.min_level, allow_pending=not args.fail_on_pending)
+        print("\n".join(lines))
+        sys.exit(0 if ok else 1)
     elif args.cmd == "summary":
         results = []
         for f in args.results:

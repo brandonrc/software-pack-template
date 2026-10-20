@@ -4,12 +4,15 @@ Scores a software-pack repository against this repo's
 [release-readiness checklist](../../docs/release-readiness-checklist.md) and
 lists what blocks the next maturity level.
 
-Two parts:
+Three parts, each optional beyond the first:
 
-| Part | What it does |
-|---|---|
-| `audit.py` + `checklist.yaml` | Deterministic scan. Renders the chart with `helm`, inspects manifests, greps docs and CI, validates `pack-metadata.yaml`, scores, writes JSON + Markdown. |
-| `.claude/agents/software-pack-auditor.md` | Claude Code agent that runs the scan, reads the pack, decides the judgment items the scanner cannot, rescores, and writes the verdict and fix list. |
+| Part | What it does | Needs |
+|---|---|---|
+| `audit.py scan` + `checklist.yaml` | Deterministic scan. Renders the chart with `helm`, inspects manifests, greps docs and CI, validates `pack-metadata.yaml`, scores, writes JSON + Markdown. 34 of 58 items. | Python, helm |
+| `audit.py judge` | Decides the 9 documentation-quality items with a language model, one request per audit, through any OpenAI-compatible endpoint or any runner that can answer a prompt (GitHub Copilot in Actions, a chat window, an agent). Provider-neutral. | a model, anywhere |
+| `.claude/agents/software-pack-auditor.md` | Optional Claude Code agent that drives scan + judge interactively, reads the pack, corrects scanner heuristics with evidence, and writes a narrative fix list. | Claude Code |
+
+The remaining 15 items need a cluster (`audit.py verify`) or a person.
 
 Design notes: [docs/superpowers/specs/2026-10-09-pack-audit-design.md](../../docs/superpowers/specs/2026-10-09-pack-audit-design.md).
 
@@ -59,7 +62,38 @@ judgment items):
 python3 -I tools/pack-audit/audit.py report tools/pack-audit/reports/my-pack.json
 ```
 
-With the agent, in Claude Code:
+### Judging the documentation items
+
+The scanner leaves nine items as JUDGMENT (README purpose, prerequisites, NebariApp
+values reference, auth docs, must-set values, metrics, logs, appVersion, image
+publishing). `judge` builds one prompt holding each item's expectation, the
+scanner's pre-check, and the relevant excerpts (README and docs sections, the
+`nebariApp` values block, Chart.yaml, rendered-manifest facts), and asks for a
+JSON verdict per item. Roughly 9k input tokens and under 1k output per pack.
+
+Any OpenAI-compatible endpoint:
+
+```bash
+export PACK_AUDIT_LLM_BASE_URL=https://openrouter.ai/api/v1   # or Ollama, vLLM, LiteLLM, Azure, OpenAI, https://api.anthropic.com/v1 ...
+export PACK_AUDIT_LLM_API_KEY=...
+export PACK_AUDIT_LLM_MODEL=openai/gpt-4.1
+python3 -I tools/pack-audit/audit.py judge tools/pack-audit/reports/my-pack.json --repo ../my-pack
+```
+
+Any other runner (paste into a chat, hand to an agent, run in CI):
+
+```bash
+python3 -I tools/pack-audit/audit.py judge tools/pack-audit/reports/my-pack.json --repo ../my-pack --prompt-out judge-prompt.md
+# ... answer judge-prompt.md with the model of your choice into answer.txt ...
+python3 -I tools/pack-audit/audit.py judge tools/pack-audit/reports/my-pack.json --repo ../my-pack --ingest answer.txt --decided-by gpt-4.1
+```
+
+Verdicts are written as `judge(<model>): <evidence>` with the scanner's pre-check
+kept in `detail`, so a reader can see both. Where the scanner had already set
+FAIL or NA, the judge is told to keep it unless the excerpts show what the
+scanner missed. Edit any status in the JSON and rerun `report` to override.
+
+With the optional Claude Code agent:
 
 ```
 Use the software-pack-auditor agent to audit ../my-pack
@@ -94,6 +128,38 @@ Needs `docker`, `kind`, `kubectl`, `helm`, and `make`. Pass `--chart` for
 branch audits (their content lives in a temporary export) and `--keep` to
 leave the install in place for a look.
 
+## In CI
+
+`.github/workflows/pack-audit.yaml` in this repository is a reusable workflow.
+A pack repository adds:
+
+```yaml
+permissions:
+  contents: read
+  security-events: write   # SARIF to code scanning (skipped where not enabled)
+  pull-requests: write     # summary comment on PRs
+  copilot-requests: write  # only when judging with Copilot
+jobs:
+  audit:
+    uses: nebari-dev/software-pack-template/.github/workflows/pack-audit.yaml@main
+    with:
+      set: my-chart.secrets.password=ci-only   # whatever the chart needs to render
+      judge: ${{ github.event_name == 'push' }} # decide judgment items on main only
+      min-level: alpha                          # optional gate
+    secrets: inherit
+```
+
+The scan job is free and needs no secrets. The judge job is one model request
+and runs only when `judge` is true. By default it uses GitHub Copilot CLI with
+the workflow token, billed to the organization's AI credits (organization
+policy "Allow use of Copilot CLI billed to the organization"; set a budget on
+the org). Pass `judge-endpoint` plus the `PACK_AUDIT_LLM_API_KEY` secret and
+`judge-model` to use any OpenAI-compatible provider instead. A failed judge
+never hides the scan result.
+
+Gate with `audit.py gate <results.json> --min-level E|A|B|GA` anywhere else;
+it exits 1 and prints the blockers.
+
 ## Exporting findings for other tools
 
 ```bash
@@ -114,7 +180,7 @@ the source of truth.
 | PASS | expectation met | 1 |
 | PARTIAL | present but incomplete or wrong for the Nebari path | 0.5 |
 | FAIL | missing | 0 |
-| JUDGMENT | scanner gathered evidence; agent decides | excluded until decided |
+| JUDGMENT | scanner gathered evidence; `judge` (or a person) decides | excluded until decided |
 | MANUAL | needs a cluster or a person | excluded |
 | NA | does not apply (with reason) | excluded |
 
@@ -137,8 +203,8 @@ promotable until those are done too.
 - Examples: example values that render, Nebari and standalone values, ArgoCD Application with a real `repoURL`.
 - Release: git tags (`vX.Y.Z`), chart version shape, `appVersion`.
 
-Heuristics are deliberately simple and transparent; the agent is expected to
-correct them with evidence. See the `observations` block in the JSON for
+Heuristics are deliberately simple and transparent; the judge or a reviewer is
+expected to correct them with evidence. See the `observations` block in the JSON for
 findings outside the checklist (double ingress, vendored charts, unmerged
 branch, generated repo, placeholder READMEs).
 

@@ -1,0 +1,291 @@
+name: Pack audit
+
+# Reusable workflow: score a software pack against docs/release-readiness-checklist.md
+# with tools/pack-audit, publish the report, optionally decide the judgment items
+# with a language model, and optionally gate on a maturity level.
+#
+# Call it from a pack repository:
+#
+#   permissions:
+#     contents: read
+#     security-events: write   # SARIF upload (needs code scanning; skipped otherwise)
+#     pull-requests: write     # summary comment on PRs
+#     copilot-requests: write  # only if judge: true with the Copilot runner
+#   jobs:
+#     audit:
+#       uses: nebari-dev/software-pack-template/.github/workflows/pack-audit.yaml@main
+#       with:
+#         set: |
+#           my-chart.secrets.password=ci-only
+#         judge: ${{ github.event_name == 'push' }}
+#       secrets: inherit
+#
+# The scan needs no secrets and no AI. The judge job runs only when `judge` is
+# true and is ONE model request per audit (~9k input tokens, <1k output). Two
+# runners:
+#   - default: GitHub Copilot CLI authenticated with the workflow token and billed
+#     to the organization's AI credits (org policy "Allow use of Copilot CLI billed
+#     to the organization" + permission copilot-requests: write).
+#   - `judge-endpoint`: any OpenAI-compatible /chat/completions base URL (OpenRouter,
+#     Azure, OpenAI, Ollama, vLLM, LiteLLM, Anthropic's compatibility endpoint...)
+#     with the PACK_AUDIT_LLM_API_KEY secret and `judge-model`.
+# Either way the verdicts land in the results JSON with the model named, and a
+# person can override them and rerun `audit.py report`.
+
+on:
+  workflow_call:
+    inputs:
+      name:
+        type: string
+        default: ""
+        description: Pack name for the report (default repository name)
+      values:
+        type: string
+        default: ""
+        description: Values files to render with, whitespace separated
+      set:
+        type: string
+        default: ""
+        description: helm --set key=value pairs the chart needs to render, whitespace separated
+      min-level:
+        type: string
+        default: ""
+        description: "Fail unless the repo-readiness level is at least this: E|A|B|GA (or experimental|alpha|beta|ga). Empty = report only"
+      judge:
+        type: boolean
+        default: false
+        description: Decide the judgment items with a language model (one request per run)
+      judge-model:
+        type: string
+        default: ""
+        description: Model for the judge. Copilot runner a model id the CLI accepts; endpoint runner the provider model id. Empty = runner default
+      judge-endpoint:
+        type: string
+        default: ""
+        description: OpenAI-compatible base URL to use instead of Copilot (needs secret PACK_AUDIT_LLM_API_KEY)
+      comment:
+        type: boolean
+        default: true
+        description: Post or update a summary comment on pull requests from this repository
+      tool-repo:
+        type: string
+        default: nebari-dev/software-pack-template
+        description: Repository that carries tools/pack-audit
+      tool-ref:
+        type: string
+        default: main
+        description: Branch or tag of tool-repo to take tools/pack-audit from
+    secrets:
+      PACK_AUDIT_LLM_API_KEY:
+        required: false
+
+env:
+  PACK_NAME: ${{ inputs.name != '' && inputs.name || github.event.repository.name }}
+
+jobs:
+  scan:
+    name: Scan
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+      security-events: write
+    steps:
+      - uses: actions/checkout@v5
+
+      - name: Fetch tools/pack-audit from ${{ inputs.tool-repo }}@${{ inputs.tool-ref }}
+        env:
+          TOOL_REPO: ${{ inputs.tool-repo }}
+          TOOL_REF: ${{ inputs.tool-ref }}
+        run: |
+          git clone --quiet --depth 1 --branch "$TOOL_REF" --filter=blob:none --sparse \
+            "https://github.com/$TOOL_REPO.git" "$RUNNER_TEMP/software-pack-template"
+          git -C "$RUNNER_TEMP/software-pack-template" sparse-checkout set tools/pack-audit
+          echo "TOOL_DIR=$RUNNER_TEMP/software-pack-template/tools/pack-audit" >> "$GITHUB_ENV"
+
+      - uses: azure/setup-helm@v5
+
+      - name: Install kubeconform
+        run: |
+          curl -sSL https://github.com/yannh/kubeconform/releases/latest/download/kubeconform-linux-amd64.tar.gz | \
+            sudo tar -xz -C /usr/local/bin kubeconform
+
+      - name: Install Python dependencies
+        run: python3 -m pip install --quiet --user pyyaml jsonschema
+
+      - name: Scan
+        env:
+          VALUES: ${{ inputs.values }}
+          SETS: ${{ inputs.set }}
+        run: |
+          args=()
+          for f in $VALUES; do args+=(--values "$f"); done
+          for kv in $SETS; do args+=(--set "$kv"); done
+          python3 -I "$TOOL_DIR/audit.py" scan . --name "$PACK_NAME" --out reports "${args[@]}"
+
+      - name: Export SARIF
+        run: python3 -I "$TOOL_DIR/audit.py" export "reports/$PACK_NAME.json" --format sarif --out reports/pack-audit.sarif
+
+      - name: Upload SARIF to code scanning
+        uses: github/codeql-action/upload-sarif@v3
+        continue-on-error: true # private repositories need code scanning enabled; the report is still in the artifact and summary
+        with:
+          sarif_file: reports/pack-audit.sarif
+          category: pack-audit
+
+      - name: Job summary
+        run: cat "reports/$PACK_NAME.md" >> "$GITHUB_STEP_SUMMARY"
+
+      - uses: actions/upload-artifact@v4
+        with:
+          name: pack-audit-reports
+          path: reports/
+          retention-days: 30
+
+  judge:
+    name: Judge (one model request)
+    needs: scan
+    if: ${{ inputs.judge }}
+    runs-on: ubuntu-latest
+    continue-on-error: true # a judge failure (org policy off, model retired, endpoint down) must not hide the scan result
+    permissions:
+      contents: read
+      copilot-requests: write
+    steps:
+      - uses: actions/checkout@v5
+
+      - name: Fetch tools/pack-audit from ${{ inputs.tool-repo }}@${{ inputs.tool-ref }}
+        env:
+          TOOL_REPO: ${{ inputs.tool-repo }}
+          TOOL_REF: ${{ inputs.tool-ref }}
+        run: |
+          git clone --quiet --depth 1 --branch "$TOOL_REF" --filter=blob:none --sparse \
+            "https://github.com/$TOOL_REPO.git" "$RUNNER_TEMP/software-pack-template"
+          git -C "$RUNNER_TEMP/software-pack-template" sparse-checkout set tools/pack-audit
+          echo "TOOL_DIR=$RUNNER_TEMP/software-pack-template/tools/pack-audit" >> "$GITHUB_ENV"
+
+      - uses: actions/download-artifact@v4
+        with:
+          name: pack-audit-reports
+          path: reports
+
+      - name: Install Python dependencies
+        run: python3 -m pip install --quiet --user pyyaml jsonschema
+
+      - name: Build the judge prompt
+        run: python3 -I "$TOOL_DIR/audit.py" judge "reports/$PACK_NAME.json" --repo . --prompt-out reports/judge-prompt.md
+
+      - name: Judge with an OpenAI-compatible endpoint
+        if: ${{ inputs.judge-endpoint != '' }}
+        env:
+          PACK_AUDIT_LLM_API_KEY: ${{ secrets.PACK_AUDIT_LLM_API_KEY }}
+          PACK_AUDIT_LLM_MODEL: ${{ inputs.judge-model }}
+          ENDPOINT: ${{ inputs.judge-endpoint }}
+        run: python3 -I "$TOOL_DIR/audit.py" judge "reports/$PACK_NAME.json" --repo . --endpoint "$ENDPOINT"
+
+      - uses: actions/setup-node@v4
+        if: ${{ inputs.judge-endpoint == '' }}
+        with:
+          node-version: 22
+
+      - name: Judge with GitHub Copilot (billed to the organization)
+        if: ${{ inputs.judge-endpoint == '' }}
+        env:
+          GITHUB_TOKEN: ${{ github.token }}
+          COPILOT_AUTO_UPDATE: "false"
+          JUDGE_MODEL: ${{ inputs.judge-model }}
+        run: |
+          npm install -g --silent @github/copilot
+          model_arg=()
+          if [ -n "$JUDGE_MODEL" ]; then model_arg=(--model="$JUDGE_MODEL"); fi
+          copilot -p "$(cat reports/judge-prompt.md)" -s --no-ask-user --no-color "${model_arg[@]}" > reports/judge-answer.txt
+          python3 -I "$TOOL_DIR/audit.py" judge "reports/$PACK_NAME.json" --repo . \
+            --ingest reports/judge-answer.txt --decided-by "copilot:${JUDGE_MODEL:-default}"
+
+      - name: Job summary
+        run: cat "reports/$PACK_NAME.md" >> "$GITHUB_STEP_SUMMARY"
+
+      - uses: actions/upload-artifact@v4
+        with:
+          name: pack-audit-reports
+          path: reports/
+          retention-days: 30
+          overwrite: true
+
+  comment:
+    name: PR comment
+    needs: [scan, judge]
+    if: ${{ always() && needs.scan.result == 'success' && inputs.comment && github.event_name == 'pull_request' && github.event.pull_request.head.repo.full_name == github.repository }}
+    runs-on: ubuntu-latest
+    permissions:
+      pull-requests: write
+    steps:
+      - uses: actions/download-artifact@v4
+        with:
+          name: pack-audit-reports
+          path: reports
+
+      - name: Post or update the audit comment
+        env:
+          GH_TOKEN: ${{ github.token }}
+          PR: ${{ github.event.pull_request.number }}
+        run: |
+          marker="<!-- pack-audit -->"
+          headline=$(python3 - <<'PY'
+          import json, os
+          d = json.load(open(f"reports/{os.environ['PACK_NAME']}.json"))
+          s = d["score"]
+          line = f"{s['overall_pct']}% · repo-readiness level: {s['repo_level'] or 'none'} · runs on Nebari: {s['runs_on_nebari']['state']}"
+          if d.get("judge"):
+              u = d["judge"].get("usage") or {}
+              line += f" · judged by {d['judge']['decided_by']}" + (f" ({u.get('prompt_tokens')} in / {u.get('completion_tokens')} out tokens)" if u else "")
+          print(line)
+          PY
+          )
+          {
+            echo "$marker"
+            echo "## Pack audit: $headline"
+            echo
+            echo "<details><summary>Full report</summary>"
+            echo
+            head -c 60000 "reports/$PACK_NAME.md"
+            echo
+            echo "</details>"
+          } > comment.md
+          cid=$(gh api "repos/$GITHUB_REPOSITORY/issues/$PR/comments" --paginate \
+                --jq ".[] | select(.body | startswith(\"$marker\")) | .id" | head -n1)
+          if [ -n "$cid" ]; then
+            gh api -X PATCH "repos/$GITHUB_REPOSITORY/issues/comments/$cid" -F body=@comment.md > /dev/null
+          else
+            gh api "repos/$GITHUB_REPOSITORY/issues/$PR/comments" -F body=@comment.md > /dev/null
+          fi
+
+  gate:
+    name: Gate on ${{ inputs.min-level }}
+    needs: [scan, judge]
+    if: ${{ always() && needs.scan.result == 'success' && inputs.min-level != '' }}
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+    steps:
+      - name: Fetch tools/pack-audit from ${{ inputs.tool-repo }}@${{ inputs.tool-ref }}
+        env:
+          TOOL_REPO: ${{ inputs.tool-repo }}
+          TOOL_REF: ${{ inputs.tool-ref }}
+        run: |
+          git clone --quiet --depth 1 --branch "$TOOL_REF" --filter=blob:none --sparse \
+            "https://github.com/$TOOL_REPO.git" "$RUNNER_TEMP/software-pack-template"
+          git -C "$RUNNER_TEMP/software-pack-template" sparse-checkout set tools/pack-audit
+          echo "TOOL_DIR=$RUNNER_TEMP/software-pack-template/tools/pack-audit" >> "$GITHUB_ENV"
+
+      - uses: actions/download-artifact@v4
+        with:
+          name: pack-audit-reports
+          path: reports
+
+      - name: Install Python dependencies
+        run: python3 -m pip install --quiet --user pyyaml jsonschema
+
+      - name: Gate
+        env:
+          MIN_LEVEL: ${{ inputs.min-level }}
+        run: python3 -I "$TOOL_DIR/audit.py" gate "reports/$PACK_NAME.json" --min-level "$MIN_LEVEL"
